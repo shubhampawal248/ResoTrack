@@ -1,4 +1,6 @@
 import streamlit as st
+from frontend.home import show_home
+from frontend.submit_workload import show_submit_workload
 
 st.set_page_config(
     page_title="SysNexa",
@@ -26,11 +28,10 @@ page = st.sidebar.radio(
 )
 
 if page == "Home":
-    st.header("Home")
-    st.write("Welcome to SysNexa.")
+    show_home()
 
 elif page == "Submit Workload":
-    st.header("Submit Workload")
+    show_submit_workload()
 
 elif page == "Scheduler":
     st.header("Scheduler")
