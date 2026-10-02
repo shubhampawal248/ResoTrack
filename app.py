@@ -1,6 +1,12 @@
 import streamlit as st
 from frontend.home import show_home
 from frontend.submit_workload import show_submit_workload
+from frontend.scheduler_page import show_scheduler
+from frontend.process_monitor import show_process_monitor
+from frontend.resource_monitor import show_resource_monitor
+from frontend.history_page import show_history
+from frontend.bottleneck_page import show_bottleneck_analysis
+from frontend.database_page import show_database_monitor
 
 st.set_page_config(
     page_title="SysNexa",
@@ -34,19 +40,19 @@ elif page == "Submit Workload":
     show_submit_workload()
 
 elif page == "Scheduler":
-    st.header("Scheduler")
+    show_scheduler()
 
 elif page == "Process Monitor":
-    st.header("Process Monitor")
+    show_process_monitor()
 
 elif page == "Resource Monitor":
-    st.header("Resource Monitor")
+    show_resource_monitor()
 
 elif page == "History":
-    st.header("History")
+    show_history()
 
 elif page == "Bottleneck Analysis":
-    st.header("Bottleneck Analysis")
+    show_bottleneck_analysis()
 
 elif page == "Database Monitor":
-    st.header("Database Monitor")
+    show_database_monitor()
