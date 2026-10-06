@@ -85,8 +85,17 @@ def show_history():
         margin-top: 15px;
     }
 
+    .failure-card {
+        background: rgba(239, 68, 68, 0.08);
+        border: 1px solid rgba(239, 68, 68, 0.30);
+        border-radius: 14px;
+        padding: 20px;
+        line-height: 1.7;
+    }
+
     </style>
     """, unsafe_allow_html=True)
+
 
     # ============================================================
     # HEADER
@@ -100,10 +109,11 @@ def show_history():
     st.markdown(
         '<div class="history-subtitle">'
         'Review previously executed workloads, scheduling decisions, '
-        'and runtime performance.'
+        'runtime performance, and recovery information.'
         '</div>',
         unsafe_allow_html=True
     )
+
 
     # ============================================================
     # SUMMARY CARDS
@@ -114,7 +124,7 @@ def show_history():
         unsafe_allow_html=True
     )
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
         st.markdown("""
@@ -128,13 +138,31 @@ def show_history():
     with col2:
         st.markdown("""
         <div class="stat-card">
+            <div class="stat-label">FAILED TASKS</div>
+            <div class="stat-value">--</div>
+            <div class="stat-description">Failed operations</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown("""
+        <div class="stat-card">
+            <div class="stat-label">RETRY ATTEMPTS</div>
+            <div class="stat-value">--</div>
+            <div class="stat-description">Recovery attempts</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col4:
+        st.markdown("""
+        <div class="stat-card">
             <div class="stat-label">AVG EXECUTION</div>
             <div class="stat-value">--</div>
             <div class="stat-description">Across completed tasks</div>
         </div>
         """, unsafe_allow_html=True)
 
-    with col3:
+    with col5:
         st.markdown("""
         <div class="stat-card">
             <div class="stat-label">AVG CPU USAGE</div>
@@ -143,14 +171,6 @@ def show_history():
         </div>
         """, unsafe_allow_html=True)
 
-    with col4:
-        st.markdown("""
-        <div class="stat-card">
-            <div class="stat-label">AVG MEMORY</div>
-            <div class="stat-value">--</div>
-            <div class="stat-description">Runtime measurements</div>
-        </div>
-        """, unsafe_allow_html=True)
 
     # ============================================================
     # FILTERS
@@ -205,6 +225,7 @@ def show_history():
             placeholder="e.g. TASK-001"
         )
 
+
     # ============================================================
     # HISTORY TABLE
     # ============================================================
@@ -227,7 +248,10 @@ def show_history():
         "Execution Time",
         "CPU Usage",
         "Memory Used",
-        "State"
+        "State",
+        "Exit Code",
+        "Retry Count",
+        "Recovery Status"
     ]
 
     # Empty table for now.
@@ -248,7 +272,12 @@ def show_history():
             "Execution Time": st.column_config.TextColumn("Execution"),
             "CPU Usage": st.column_config.TextColumn("CPU"),
             "Memory Used": st.column_config.TextColumn("Memory"),
-            "State": st.column_config.TextColumn("State")
+            "State": st.column_config.TextColumn("State"),
+            "Exit Code": st.column_config.NumberColumn("Exit Code"),
+            "Retry Count": st.column_config.NumberColumn("Retry Count"),
+            "Recovery Status": st.column_config.TextColumn(
+                "Recovery Status"
+            )
         },
         use_container_width=True,
         hide_index=True
@@ -258,10 +287,65 @@ def show_history():
     <div class="empty-card">
         <div class="empty-icon">🗂️</div>
         <strong>No execution history available</strong><br>
-        Completed workload records will appear here after the
-        runtime and PostgreSQL modules are connected.
+        Completed and failed workload records will appear here after
+        the runtime and PostgreSQL modules are connected.
     </div>
     """, unsafe_allow_html=True)
+
+
+    # ============================================================
+    # FAILURE & RECOVERY INFORMATION
+    # ============================================================
+
+    st.markdown(
+        '<div class="section-title">⚠️ Failure & Recovery History</div>',
+        unsafe_allow_html=True
+    )
+
+    st.markdown("""
+    <div class="failure-card">
+
+        <strong>Failure Detection</strong><br>
+
+        SysNexa checks the result of an operation after its Linux
+        process terminates. A successful process is recorded as
+        <b>COMPLETED</b>, while a non-zero exit status is recorded
+        as <b>FAILED</b>.
+
+        <br><br>
+
+        <strong>Recovery</strong><br>
+
+        When recovery is allowed, a failed operation can be returned
+        to the READY queue for a controlled retry. The retry count
+        and recovery result are stored for future reference.
+
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("")
+
+    failure_data = {
+        "Task ID": [],
+        "Workload": [],
+        "PID": [],
+        "Exit Code": [],
+        "Failure Reason": [],
+        "Retry Count": [],
+        "Recovery Status": []
+    }
+
+    st.dataframe(
+        failure_data,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.caption(
+        "Failure and recovery records will appear here after the "
+        "failure detection and recovery modules are connected."
+    )
+
 
     # ============================================================
     # SELECTED WORKLOAD DETAILS
@@ -282,10 +366,12 @@ def show_history():
         st.markdown("""
         <div class="info-card">
             <strong>📌 No workload selected</strong><br><br>
-            Once a workload is completed, you will be able to
-            select it here and view its complete execution details.
+            Once a workload is completed or failed, you will be able
+            to select it here and view its complete execution and
+            recovery details.
         </div>
         """, unsafe_allow_html=True)
+
 
     # ============================================================
     # WHAT WILL BE STORED
@@ -311,7 +397,8 @@ def show_history():
         • Process state<br>
         • Arrival time<br>
         • Start time<br>
-        • Completion time
+        • Completion time<br>
+        • Exit code
 
         </div>
         """, unsafe_allow_html=True)
@@ -320,7 +407,7 @@ def show_history():
         st.markdown("""
         <div class="info-card">
 
-        <strong>Performance Information</strong><br><br>
+        <strong>Performance & Recovery Information</strong><br><br>
 
         • Execution time<br>
         • CPU utilization<br>
@@ -328,17 +415,22 @@ def show_history():
         • Disk activity<br>
         • Scheduling algorithm<br>
         • Waiting time<br>
-        • Turnaround time
+        • Turnaround time<br>
+        • Retry count<br>
+        • Recovery status
 
         </div>
         """, unsafe_allow_html=True)
+
 
     # ============================================================
     # ADAPTIVE SCHEDULER SECTION
     # ============================================================
 
     st.markdown(
-        '<div class="section-title">🧠 Historical Data for Adaptive Scheduling</div>',
+        '<div class="section-title">'
+        '🧠 Historical Data for Adaptive Scheduling'
+        '</div>',
         unsafe_allow_html=True
     )
 
@@ -370,7 +462,7 @@ def show_history():
     <strong>First execution:</strong>
     No historical data → use available task information/default policy.
 
-    <br>
+    <br><br>
 
     <strong>Future execution:</strong>
     Historical data available → adaptive scheduler can consider
@@ -378,6 +470,7 @@ def show_history():
 
     </div>
     """, unsafe_allow_html=True)
+
 
     # ============================================================
     # REFRESH BUTTON
@@ -394,14 +487,19 @@ def show_history():
             "database backend is connected."
         )
 
+
     # ============================================================
     # CURRENT DEVELOPMENT STATUS
     # ============================================================
 
     st.markdown("""
     <div class="status-note">
-        <strong>Development Status:</strong>
-        Frontend ready. PostgreSQL and runtime monitoring will
-        provide the actual historical data later.
+
+        <strong>Development Status:</strong><br>
+
+        Frontend ready. PostgreSQL, runtime monitoring, failure
+        detection and recovery modules will provide the actual
+        historical data later.
+
     </div>
     """, unsafe_allow_html=True)

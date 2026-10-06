@@ -7,6 +7,7 @@ def show_submit_workload():
     # ==========================================
     # PAGE STYLING
     # ==========================================
+
     st.markdown("""
     <style>
 
@@ -83,6 +84,7 @@ def show_submit_workload():
     # ==========================================
     # PAGE HEADER
     # ==========================================
+
     st.markdown(
         '<div class="page-title">Submit Workload</div>',
         unsafe_allow_html=True
@@ -99,6 +101,7 @@ def show_submit_workload():
     # ==========================================
     # WORKLOAD CATEGORY
     # ==========================================
+
     st.markdown(
         '<div class="section-title">Select Workload Category</div>',
         unsafe_allow_html=True
@@ -148,6 +151,7 @@ def show_submit_workload():
     # ==========================================
     # WORKLOAD DETAILS
     # ==========================================
+
     st.markdown(
         '<div class="section-title">Workload Details</div>',
         unsafe_allow_html=True
@@ -162,6 +166,7 @@ def show_submit_workload():
     # ==========================================
     # DEFAULT VALUES
     # ==========================================
+
     uploaded_file = None
     sql_query = ""
     operation = ""
@@ -172,6 +177,7 @@ def show_submit_workload():
     # ==========================================
     # PROGRAM / QUERY EXECUTION
     # ==========================================
+
     if category == "Program / Query Execution":
 
         execution_type = st.selectbox(
@@ -208,6 +214,7 @@ def show_submit_workload():
     # ==========================================
     # FILE TRANSFER OPERATION
     # ==========================================
+
     else:
 
         operation = st.selectbox(
@@ -250,9 +257,21 @@ def show_submit_workload():
     # ==========================================
     # SCHEDULING CONFIGURATION
     # ==========================================
+
     st.markdown(
         '<div class="section-title">Scheduling Configuration</div>',
         unsafe_allow_html=True
+    )
+
+    # Scheduling mode
+    scheduling_mode = st.radio(
+        "Scheduling Mode",
+        [
+            "Manual",
+            "Automatic"
+        ],
+        horizontal=True,
+        help="Manual allows the user to select an algorithm. Automatic lets SysNexa choose the scheduling algorithm."
     )
 
     col1, col2 = st.columns(2)
@@ -268,45 +287,111 @@ def show_submit_workload():
 
     with col2:
 
-        scheduler = st.selectbox(
-            "Scheduling Algorithm",
-            [
-                "FCFS",
-                "SJF",
-                "Priority",
-                "Round Robin",
-                "Adaptive"
-            ]
-        )
+        if scheduling_mode == "Manual":
+
+            scheduler = st.selectbox(
+                "Scheduling Algorithm",
+                [
+                    "FCFS",
+                    "SJF",
+                    "Priority",
+                    "Round Robin",
+                    "Adaptive"
+                ]
+            )
+
+        else:
+
+            scheduler = "Automatic"
+
+            st.text_input(
+                "Scheduling Algorithm",
+                value="System Selected",
+                disabled=True
+            )
 
 
     # ==========================================
     # SCHEDULER DESCRIPTION
     # ==========================================
-    scheduler_description = {
 
+    scheduler_description = {
         "FCFS":
-        "Tasks are selected according to their arrival order.",
+            "Tasks are selected according to their arrival order.",
 
         "SJF":
-        "Workloads with shorter estimated execution time are preferred.",
+            "Workloads with shorter estimated execution time are preferred.",
 
         "Priority":
-        "Higher-priority workloads are selected before lower-priority workloads.",
+            "Higher-priority workloads are selected before lower-priority workloads.",
 
         "Round Robin":
-        "Ready workloads are handled using a time-slice based queue.",
+            "Ready workloads are handled using a time-slice based queue.",
 
         "Adaptive":
-        "Scheduling decisions can use workload history and current system conditions."
+            "Scheduling decisions can use workload history and current system conditions.",
+
+        "Automatic":
+            "SysNexa automatically selects a suitable scheduling algorithm based on workload characteristics and system conditions."
     }
 
     st.info(scheduler_description[scheduler])
 
 
     # ==========================================
+    # FAILURE DETECTION & RECOVERY
+    # ==========================================
+
+    st.markdown(
+        '<div class="section-title">Failure Detection & Recovery</div>',
+        unsafe_allow_html=True
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        automatic_retry = st.radio(
+            "Automatic Retry",
+            [
+                "Yes",
+                "No"
+            ],
+            horizontal=True,
+            help="If the workload fails, SysNexa can automatically return it to the READY queue for retry."
+        )
+
+    with col2:
+
+        max_retries = 2
+
+        st.text_input(
+            "Maximum Retries",
+            value=str(max_retries),
+            disabled=True,
+            help="SysNexa allows a maximum of 2 retry attempts."
+        )
+
+    if automatic_retry == "Yes":
+
+        st.info(
+            "If the workload fails, SysNexa will detect the failure "
+            "using the process exit status and can retry the workload "
+            "up to 2 times."
+        )
+
+    else:
+
+        st.info(
+            "Failed workloads will be recorded as FAILED and will not "
+            "be automatically retried."
+        )
+
+
+    # ==========================================
     # RUNTIME INFORMATION
     # ==========================================
+
     st.markdown(
         '<div class="section-title">Runtime Information</div>',
         unsafe_allow_html=True
@@ -342,6 +427,7 @@ def show_submit_workload():
     # ==========================================
     # AUTOMATIC RUNTIME MONITORING
     # ==========================================
+
     st.markdown("""
     <div class="ready-box">
         <strong style="color:#60a5fa; font-size:15px;">
@@ -363,6 +449,7 @@ def show_submit_workload():
     # ==========================================
     # SUBMIT BUTTON
     # ==========================================
+
     submit = st.button(
         "🚀 Submit Workload",
         use_container_width=True,
@@ -373,11 +460,13 @@ def show_submit_workload():
     # ==========================================
     # VALIDATION AND TASK CREATION
     # ==========================================
+
     if submit:
 
         # --------------------------------------
         # Workload name
         # --------------------------------------
+
         if not task_name.strip():
 
             st.warning("Please enter a workload name.")
@@ -387,6 +476,7 @@ def show_submit_workload():
         # --------------------------------------
         # Program / Query validation
         # --------------------------------------
+
         if category == "Program / Query Execution":
 
             if execution_type == "SQL Query":
@@ -407,6 +497,7 @@ def show_submit_workload():
         # --------------------------------------
         # File Transfer validation
         # --------------------------------------
+
         else:
 
             if operation == "File Upload":
@@ -427,6 +518,7 @@ def show_submit_workload():
         # --------------------------------------
         # Temporary Task Creation
         # --------------------------------------
+
         task_id = "TASK-" + datetime.now().strftime("%H%M%S")
 
 
@@ -438,6 +530,7 @@ def show_submit_workload():
         # ==========================================
         # TASK SUMMARY
         # ==========================================
+
         st.markdown(
             '<div class="section-title">Workload Summary</div>',
             unsafe_allow_html=True
@@ -464,6 +557,11 @@ def show_submit_workload():
                 priority
             )
 
+            st.write(
+                "**Scheduling Mode:**",
+                scheduling_mode
+            )
+
 
         with col2:
 
@@ -485,6 +583,16 @@ def show_submit_workload():
                     "**Operation:**",
                     operation
                 )
+
+            st.write(
+                "**Automatic Retry:**",
+                automatic_retry
+            )
+
+            st.write(
+                "**Maximum Retries:**",
+                max_retries
+            )
 
             st.write(
                 "**State:**",

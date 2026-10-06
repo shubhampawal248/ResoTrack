@@ -75,6 +75,14 @@ def show_scheduler():
         margin-top: 18px;
     }
 
+    .order-box {
+        background: #111827;
+        border: 1px solid #273449;
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 10px;
+    }
+
     </style>
     """, unsafe_allow_html=True)
 
@@ -103,9 +111,17 @@ def show_scheduler():
         unsafe_allow_html=True
     )
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+        st.markdown("""
+        <div class="status-card">
+            <div class="status-label">Scheduling Mode</div>
+            <div class="status-value">Not Active</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
         st.markdown("""
         <div class="status-card">
             <div class="status-label">Current Algorithm</div>
@@ -113,7 +129,7 @@ def show_scheduler():
         </div>
         """, unsafe_allow_html=True)
 
-    with col2:
+    with col3:
         st.markdown("""
         <div class="status-card">
             <div class="status-label">READY Workloads</div>
@@ -121,7 +137,7 @@ def show_scheduler():
         </div>
         """, unsafe_allow_html=True)
 
-    with col3:
+    with col4:
         st.markdown("""
         <div class="status-card">
             <div class="status-label">Running Workload</div>
@@ -131,10 +147,10 @@ def show_scheduler():
 
 
     # ==========================================
-    # ALGORITHM SELECTION
+    # ALGORITHM OVERVIEW
     # ==========================================
     st.markdown(
-        '<div class="section-title">Select Scheduling Algorithm</div>',
+        '<div class="section-title">Available Scheduling Algorithms</div>',
         unsafe_allow_html=True
     )
 
@@ -190,73 +206,127 @@ def show_scheduler():
 
     st.write("")
 
-    st.markdown("""
-    <div class="algorithm-card">
-        <div class="algorithm-title">🧠 Adaptive Scheduler</div>
-        <div class="algorithm-description">
-            Uses workload history, current system conditions and
-            scheduling information to make adaptive decisions.
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("""
+        <div class="algorithm-card">
+            <div class="algorithm-title">🧠 Adaptive Scheduler</div>
+            <div class="algorithm-description">
+                Uses workload history, current system conditions
+                and scheduling information to make adaptive decisions.
+            </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("""
+        <div class="algorithm-card">
+            <div class="algorithm-title">🔄 Automatic Scheduler Switching</div>
+            <div class="algorithm-description">
+                Automatically selects a suitable scheduling algorithm
+                based on workload characteristics and system conditions.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 
     # ==========================================
-    # SELECT ALGORITHM
+    # SCHEDULING MODE
     # ==========================================
     st.markdown(
-        '<div class="section-title">Scheduling Configuration</div>',
+        '<div class="section-title">Scheduling Mode</div>',
         unsafe_allow_html=True
     )
 
-    algorithm = st.selectbox(
-        "Scheduling Algorithm",
+    scheduling_mode = st.radio(
+        "Scheduling Mode",
         [
-            "FCFS",
-            "SJF",
-            "Priority",
-            "Round Robin",
-            "Adaptive"
-        ]
+            "Manual",
+            "Automatic"
+        ],
+        horizontal=True
     )
 
-    if algorithm == "Round Robin":
 
-        time_quantum = st.number_input(
-            "Time Quantum",
-            min_value=1,
-            value=2,
-            step=1,
-            help="Time slice used by the application-level Round Robin scheduler."
+    # ==========================================
+    # MANUAL SCHEDULER CONFIGURATION
+    # ==========================================
+    if scheduling_mode == "Manual":
+
+        algorithm = st.selectbox(
+            "Scheduling Algorithm",
+            [
+                "FCFS",
+                "SJF",
+                "Priority",
+                "Round Robin",
+                "Adaptive"
+            ]
         )
 
-        st.caption(
-            f"Current time quantum: {time_quantum}"
-        )
+        if algorithm == "Round Robin":
+
+            time_quantum = st.number_input(
+                "Time Quantum",
+                min_value=1,
+                value=2,
+                step=1,
+                help="Time slice used by the application-level Round Robin scheduler."
+            )
+
+            st.caption(
+                f"Current time quantum: {time_quantum}"
+            )
+
+        descriptions = {
+
+            "FCFS":
+                "The next workload is selected according to arrival order.",
+
+            "SJF":
+                "The workload with the shortest estimated execution time is selected.",
+
+            "Priority":
+                "The workload with the highest priority is selected first. Priority 1 is highest.",
+
+            "Round Robin":
+                "Workloads are handled using a rotating READY queue and a time quantum.",
+
+            "Adaptive":
+                "The scheduler can use previous workload history and current system conditions."
+        }
+
+        st.info(descriptions[algorithm])
 
 
     # ==========================================
-    # ALGORITHM INFORMATION
+    # AUTOMATIC SCHEDULER CONFIGURATION
     # ==========================================
-    descriptions = {
+    else:
 
-        "FCFS":
-        "The next workload is selected according to arrival order.",
+        algorithm = "System Selected"
 
-        "SJF":
-        "The workload with the shortest estimated execution time is selected.",
+        st.info(
+            "Automatic Scheduler Switching is enabled. "
+            "SysNexa will select a suitable scheduling algorithm "
+            "based on workload characteristics, READY queue information, "
+            "workload history and current system conditions."
+        )
 
-        "Priority":
-        "The workload with the highest priority is selected first. Priority 1 is highest.",
-
-        "Round Robin":
-        "Workloads are handled using a rotating READY queue and a time quantum.",
-
-        "Adaptive":
-        "The scheduler can use previous workload history and current system conditions."
-    }
-
-    st.info(descriptions[algorithm])
+        st.markdown("""
+        <div class="info-box">
+            <strong style="color:#60a5fa; font-size:15px;">
+                🔄 Automatic Scheduler Switching
+            </strong>
+            <br><br>
+            <span style="color:#cbd5e1; font-size:13px;">
+                The system can select FCFS, SJF, Priority, Round Robin
+                or Adaptive scheduling depending on the characteristics
+                of the current workload.
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
 
 
     # ==========================================
@@ -269,6 +339,86 @@ def show_scheduler():
 
     st.info(
         "No workloads are currently available in the READY queue."
+    )
+
+
+    # ==========================================
+    # SUBMISSION ORDER VS EXECUTION ORDER
+    # ==========================================
+    st.markdown(
+        '<div class="section-title">'
+        'Submission Order vs Selection Order'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.subheader("📥 Submission Order")
+
+        st.markdown("""
+        <div class="order-box">
+            No workloads submitted yet.
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+
+        st.subheader("▶️ Selection / Execution Order")
+
+        st.markdown("""
+        <div class="order-box">
+            No workloads selected yet.
+        </div>
+        """, unsafe_allow_html=True)
+
+
+    # ==========================================
+    # COMPLETED TASKS
+    # ==========================================
+    st.markdown(
+        '<div class="section-title">Completed Workloads</div>',
+        unsafe_allow_html=True
+    )
+
+    st.info(
+        "No completed workloads available yet."
+    )
+
+
+    # ==========================================
+    # FAILED / RECOVERY STATUS
+    # ==========================================
+    st.markdown(
+        '<div class="section-title">Failure & Recovery Status</div>',
+        unsafe_allow_html=True
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "Failed Workloads",
+            "0"
+        )
+
+    with col2:
+        st.metric(
+            "Retry Attempts",
+            "0"
+        )
+
+    with col3:
+        st.metric(
+            "Recovered Workloads",
+            "0"
+        )
+
+    st.info(
+        "Failed workloads can be returned to the READY queue for "
+        "retry when automatic recovery is enabled."
     )
 
 
@@ -304,6 +454,21 @@ def show_scheduler():
             from the READY queue. The selected workload is then
             passed to the workload executor for execution in
             the Linux environment.
+            <br><br>
+            In Automatic mode, SysNexa can switch between supported
+            scheduling algorithms based on workload characteristics
+            and system conditions.
         </span>
     </div>
     """, unsafe_allow_html=True)
+
+
+    # ==========================================
+    # DEVELOPMENT STATUS
+    # ==========================================
+    st.divider()
+
+    st.success(
+        "Development Status: Scheduler frontend ready. "
+        "Runtime scheduling data will appear after backend integration."
+    )
