@@ -1,4 +1,5 @@
 from datetime import datetime
+import time
 
 
 class Process:
@@ -26,14 +27,31 @@ class Process:
         self.exit_code = None
         self.retry_count = 0
 
+        self.execution_time = None
+        self.cpu_time_seconds = None
+        self.cpu_percent = None
+        self.memory_peak_bytes = None
+        self.stdout = ""
+        self.stderr = ""
+        self.failure_reason = None
+        self.timed_out = False
+        self._start_monotonic = None
+
     def start(self, pid=None):
         self.state = "RUNNING"
         self.start_time = datetime.now()
+        self._start_monotonic = time.monotonic()
         self.pid = pid
 
     def complete(self, exit_code=0):
         self.completion_time = datetime.now()
         self.exit_code = exit_code
+
+        if self._start_monotonic is not None:
+            self.execution_time = max(
+                0.0,
+                time.monotonic() - self._start_monotonic
+            )
 
         if exit_code == 0:
             self.state = "COMPLETED"
@@ -46,6 +64,15 @@ class Process:
         self.completion_time = None
         self.pid = None
         self.exit_code = None
+        self.execution_time = None
+        self.cpu_time_seconds = None
+        self.cpu_percent = None
+        self.memory_peak_bytes = None
+        self.stdout = ""
+        self.stderr = ""
+        self.failure_reason = None
+        self.timed_out = False
+        self._start_monotonic = None
         self.retry_count += 1
 
     def get_waiting_time(self):
@@ -73,5 +100,11 @@ class Process:
             "completion_time": self.completion_time,
             "exit_code": self.exit_code,
             "retry_count": self.retry_count,
-            "estimated_time": self.estimated_time
+            "estimated_time": self.estimated_time,
+            "execution_time": self.execution_time,
+            "cpu_time_seconds": self.cpu_time_seconds,
+            "cpu_percent": self.cpu_percent,
+            "memory_peak_bytes": self.memory_peak_bytes,
+            "failure_reason": self.failure_reason,
+            "timed_out": self.timed_out,
         }
