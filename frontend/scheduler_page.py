@@ -1,474 +1,1118 @@
+from datetime import datetime
+
 import streamlit as st
+import pandas as pd
+
+from backend.database_manager import DatabaseManager
+from backend.fcfs import FCFSScheduler
+from backend.sjf import SJFScheduler
+from backend.priority import PriorityScheduler
+from backend.round_robin import RoundRobinScheduler
+from backend.adaptive_scheduler import AdaptiveScheduler
+from backend.automatic_scheduler import AutomaticScheduler
+from backend.workload_executor import WorkloadExecutor
 
 
 def show_scheduler():
 
-    # ==========================================
-    # PAGE STYLING
-    # ==========================================
-    st.markdown("""
-    <style>
+    st.title("SysNexa — Scheduler")
 
-    .page-title {
-        font-size: 32px;
-        font-weight: 700;
-        margin-bottom: 4px;
-    }
-
-    .page-subtitle {
-        color: #9ca3af;
-        font-size: 15px;
-        margin-bottom: 28px;
-    }
-
-    .section-title {
-        font-size: 20px;
-        font-weight: 600;
-        margin-top: 15px;
-        margin-bottom: 14px;
-    }
-
-    .algorithm-card {
-        background: #111827;
-        border: 1px solid #273449;
-        border-radius: 12px;
-        padding: 18px;
-        min-height: 135px;
-    }
-
-    .algorithm-title {
-        font-size: 17px;
-        font-weight: 600;
-        margin-bottom: 8px;
-    }
-
-    .algorithm-description {
-        color: #9ca3af;
-        font-size: 13px;
-        line-height: 1.5;
-    }
-
-    .status-card {
-        background: #111827;
-        border: 1px solid #273449;
-        border-radius: 10px;
-        padding: 16px;
-        text-align: center;
-    }
-
-    .status-label {
-        color: #9ca3af;
-        font-size: 12px;
-    }
-
-    .status-value {
-        font-size: 17px;
-        font-weight: 600;
-        margin-top: 5px;
-    }
-
-    .info-box {
-        background: rgba(59, 130, 246, 0.10);
-        border: 1px solid rgba(59, 130, 246, 0.35);
-        border-radius: 10px;
-        padding: 16px;
-        margin-top: 18px;
-    }
-
-    .order-box {
-        background: #111827;
-        border: 1px solid #273449;
-        border-radius: 10px;
-        padding: 16px;
-        margin-bottom: 10px;
-    }
-
-    </style>
-    """, unsafe_allow_html=True)
-
-
-    # ==========================================
-    # PAGE HEADER
-    # ==========================================
-    st.markdown(
-        '<div class="page-title">Scheduler</div>',
-        unsafe_allow_html=True
+    st.caption(
+        "Submit multiple workloads, preview their scheduling order, "
+        "and execute Python, C/C++ and file-transfer workloads."
     )
 
-    st.markdown(
-        '<div class="page-subtitle">'
-        'Manage the order in which READY workloads are selected for execution.'
-        '</div>',
-        unsafe_allow_html=True
+    task_manager = st.session_state.get("task_manager")
+
+    if task_manager is None:
+        st.error("TaskManager is not initialized. Check app.py.")
+        return
+
+    # =========================================================
+    # SCHEDULING CONTROLS
+    # =========================================================
+
+    st.subheader("Scheduling Controls")
+
+    mode = st.radio(
+        "Scheduling mode",
+        ["Manual", "Automatic"],
+        horizontal=True,
+        key="scheduler_mode_choice",
     )
 
-
-    # ==========================================
-    # CURRENT SCHEDULER STATUS
-    # ==========================================
-    st.markdown(
-        '<div class="section-title">Scheduler Status</div>',
-        unsafe_allow_html=True
+    algorithm = st.selectbox(
+        "Scheduling algorithm",
+        [
+            "FCFS",
+            "SJF",
+            "Priority",
+            "Round Robin",
+            "Adaptive Scheduler",
+            "Automatic Scheduler Switching",
+        ],
+        key="scheduler_algorithm_choice",
     )
+
+    descriptions = {
+        "FCFS":
+            "The earliest-arriving READY workload is selected first.",
+
+        "SJF":
+            "The READY workload with the shortest estimated "
+            "execution time is selected first.",
+
+        "Priority":
+            "Priority 1 represents the highest priority.",
+
+        "Round Robin":
+            "True time-sliced execution requires preemption support.",
+
+        "Adaptive Scheduler":
+            "Scheduling decisions depend on the adaptive scheduler's rules.",
+
+        "Automatic Scheduler Switching":
+            "The automatic scheduler chooses an algorithm.",
+    }
+
+    st.info(descriptions[algorithm])
+
+    effective_mode = (
+        "Automatic"
+        if mode == "Automatic"
+        or algorithm == "Automatic Scheduler Switching"
+        else "Manual"
+    )
+
+    st.session_state["selected_scheduling_mode"] = effective_mode
+
+    st.session_state["selected_algorithm"] = (
+        "Automatic Scheduler Switching"
+        if effective_mode == "Automatic"
+        else algorithm
+    )
+
+    tasks = task_manager.get_all_tasks()
+
+    ready_tasks = task_manager.get_ready_tasks()
+
+    running_tasks = task_manager.get_running_tasks()
+
+    completed_tasks = task_manager.get_completed_tasks()
+
+    failed_tasks = task_manager.get_failed_tasks()
+
+    # =========================================================
+    # SCHEDULER STATUS
+    # =========================================================
+
+    st.subheader("Scheduler Status")
 
     col1, col2, col3, col4 = st.columns(4)
 
-    with col1:
-        st.markdown("""
-        <div class="status-card">
-            <div class="status-label">Scheduling Mode</div>
-            <div class="status-value">Not Active</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="status-card">
-            <div class="status-label">Current Algorithm</div>
-            <div class="status-value">Not Selected</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col3:
-        st.markdown("""
-        <div class="status-card">
-            <div class="status-label">READY Workloads</div>
-            <div class="status-value">0</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col4:
-        st.markdown("""
-        <div class="status-card">
-            <div class="status-label">Running Workload</div>
-            <div class="status-value">None</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-
-    # ==========================================
-    # ALGORITHM OVERVIEW
-    # ==========================================
-    st.markdown(
-        '<div class="section-title">Available Scheduling Algorithms</div>',
-        unsafe_allow_html=True
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        <div class="algorithm-card">
-            <div class="algorithm-title">🔵 FCFS</div>
-            <div class="algorithm-description">
-                First Come First Serve selects workloads according
-                to their arrival order in the READY queue.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="algorithm-card">
-            <div class="algorithm-title">🟣 SJF</div>
-            <div class="algorithm-description">
-                Shortest Job First prefers workloads with the
-                shortest estimated execution time.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.write("")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        <div class="algorithm-card">
-            <div class="algorithm-title">🟠 Priority</div>
-            <div class="algorithm-description">
-                Higher-priority workloads are selected before
-                lower-priority workloads.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="algorithm-card">
-            <div class="algorithm-title">🟢 Round Robin</div>
-            <div class="algorithm-description">
-                READY workloads are handled in a rotating queue
-                using a configured time slice.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.write("")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        <div class="algorithm-card">
-            <div class="algorithm-title">🧠 Adaptive Scheduler</div>
-            <div class="algorithm-description">
-                Uses workload history, current system conditions
-                and scheduling information to make adaptive decisions.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="algorithm-card">
-            <div class="algorithm-title">🔄 Automatic Scheduler Switching</div>
-            <div class="algorithm-description">
-                Automatically selects a suitable scheduling algorithm
-                based on workload characteristics and system conditions.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-
-    # ==========================================
-    # SCHEDULING MODE
-    # ==========================================
-    st.markdown(
-        '<div class="section-title">Scheduling Mode</div>',
-        unsafe_allow_html=True
-    )
-
-    scheduling_mode = st.radio(
+    col1.metric(
         "Scheduling Mode",
-        [
-            "Manual",
-            "Automatic"
-        ],
-        horizontal=True
+        st.session_state["selected_scheduling_mode"],
     )
 
+    col2.metric(
+        "Current Algorithm",
+        st.session_state["selected_algorithm"],
+    )
 
-    # ==========================================
-    # MANUAL SCHEDULER CONFIGURATION
-    # ==========================================
-    if scheduling_mode == "Manual":
+    col3.metric(
+        "READY Workloads",
+        len(ready_tasks)
+    )
 
-        algorithm = st.selectbox(
-            "Scheduling Algorithm",
+    col4.metric(
+        "Running Workload",
+        running_tasks[0].workload_name
+        if running_tasks else "None",
+    )
+
+    # =========================================================
+    # AVAILABLE ALGORITHMS
+    # =========================================================
+
+    st.subheader("Available Scheduling Algorithms")
+
+    algorithms = [
+        (
+            "FCFS",
+            "Selects workloads in arrival order."
+        ),
+        (
+            "SJF",
+            "Selects the shortest estimated workload first."
+        ),
+        (
+            "Priority",
+            "Selects the highest-priority workload first."
+        ),
+        (
+            "Round Robin",
+            "Uses repeated time slices when supported."
+        ),
+        (
+            "Adaptive Scheduler",
+            "Adapts scheduling decisions."
+        ),
+        (
+            "Automatic Scheduler",
+            "Chooses an algorithm automatically."
+        ),
+    ]
+
+    columns = st.columns(3)
+
+    for index, (name, description) in enumerate(algorithms):
+
+        with columns[index % 3]:
+
+            with st.container(border=True):
+
+                st.markdown(f"**{name}**")
+
+                st.write(description)
+
+    # =========================================================
+    # READY QUEUE
+    # =========================================================
+
+    st.subheader("READY Queue")
+
+    if ready_tasks:
+
+        ready_data = [
+            {
+                "Task ID": task.task_id,
+                "Workload": task.workload_name,
+                "Type": task.workload_type,
+                "Priority": task.priority,
+                "Estimated Time": task.estimated_time,
+                "Arrival Time": str(task.arrival_time),
+                "State": task.state,
+            }
+            for task in ready_tasks
+        ]
+
+        st.dataframe(
+            pd.DataFrame(ready_data),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    else:
+
+        st.info(
+            "No workloads are currently in the READY queue."
+        )
+
+    # =========================================================
+    # SUBMISSION ORDER
+    # =========================================================
+
+    st.subheader("Submission Order")
+
+    if tasks:
+
+        submission_data = [
+            {
+                "Task ID": task.task_id,
+                "Workload": task.workload_name,
+                "Type": task.workload_type,
+                "State": task.state,
+            }
+            for task in tasks
+        ]
+
+        st.dataframe(
+            pd.DataFrame(submission_data),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    else:
+
+        st.info("No workloads have been submitted yet.")
+
+    # =========================================================
+    # SCHEDULER HELPERS
+    # =========================================================
+
+    scheduler_classes = {
+        "FCFS": FCFSScheduler,
+        "SJF": SJFScheduler,
+        "Priority": PriorityScheduler,
+        "Round Robin": RoundRobinScheduler,
+        "Adaptive Scheduler": AdaptiveScheduler,
+    }
+
+    def select_next_workload(available_tasks):
+
+        if not available_tasks:
+
+            return None, "None"
+
+        if (
+            effective_mode == "Automatic"
+            or algorithm == "Automatic Scheduler Switching"
+        ):
+
+            scheduler = AutomaticScheduler()
+
+            scheduler.add_processes(
+                list(available_tasks)
+            )
+
+            selected_task = scheduler.select_next()
+
+            if selected_task is None:
+
+                return None, "Automatic"
+
+            return (
+                selected_task,
+                scheduler.get_selected_algorithm()
+                or "Automatic",
+            )
+
+        scheduler_class = scheduler_classes[algorithm]
+
+        scheduler = scheduler_class()
+
+        scheduler.add_processes(
+            list(available_tasks)
+        )
+
+        return scheduler.select_next(), algorithm
+
+    # =========================================================
+    # CHECK SUPPORTED WORKLOADS
+    # =========================================================
+
+    def is_executable(task):
+
+        # FILE TRANSFER WORKLOAD
+
+        if task.workload_type == "file_transfer":
+
+            operation = getattr(
+                task,
+                "operation",
+                ""
+            )
+
+            if operation == "File Upload":
+
+                return (
+                    getattr(
+                        task,
+                        "uploaded_bytes",
+                        None
+                    ) is not None
+                )
+
+            if operation == "File Download":
+
+                return bool(
+                    getattr(
+                        task,
+                        "download_url",
+                        ""
+                    ).strip()
+                )
+
+            return False
+
+        # PYTHON AND C/C++ WORKLOAD
+
+        source_code = getattr(
+            task,
+            "source_code",
+            None
+        )
+
+        return (
+            task.workload_type in ("python", "cpp")
+            and isinstance(source_code, str)
+            and bool(source_code.strip())
+        )
+
+    # =========================================================
+    # BUILD EXECUTION ORDER
+    # =========================================================
+
+    def build_execution_order(available_tasks):
+
+        remaining = list(available_tasks)
+
+        ordered = []
+
+        while remaining:
+
+            selected_task, selected_algorithm = (
+                select_next_workload(remaining)
+            )
+
+            if selected_task is None:
+
+                break
+
+            ordered.append(
+                (selected_task, selected_algorithm)
+            )
+
+            remaining = [
+                task
+                for task in remaining
+                if task.task_id != selected_task.task_id
+            ]
+
+        return ordered
+
+    # =========================================================
+    # EXECUTION QUEUE PREVIEW
+    # =========================================================
+
+    st.subheader("Execution Queue Preview")
+
+    runnable_tasks = [
+        task
+        for task in ready_tasks
+        if is_executable(task)
+    ]
+
+    unsupported_tasks = [
+        task
+        for task in ready_tasks
+        if not is_executable(task)
+    ]
+
+    preview_order = build_execution_order(
+        runnable_tasks
+    )
+
+    if preview_order:
+
+        preview_data = [
+            {
+                "Position": index,
+                "Task ID": task.task_id,
+                "Workload": task.workload_name,
+                "Type": task.workload_type,
+                "Algorithm": selected_algorithm,
+                "Priority": task.priority,
+                "Estimated Time": task.estimated_time,
+                "State": task.state,
+            }
+
+            for index, (task, selected_algorithm)
+            in enumerate(preview_order, start=1)
+        ]
+
+        st.dataframe(
+            pd.DataFrame(preview_data),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    else:
+
+        st.info(
+            "No executable Python, C/C++ or file-transfer "
+            "workloads are ready."
+        )
+
+    if unsupported_tasks:
+
+        st.warning(
+            f"{len(unsupported_tasks)} READY workload(s) "
+            "cannot be executed. SQL execution is not "
+            "implemented here, or required workload "
+            "details are missing."
+        )
+
+    # =========================================================
+    # SCHEDULER CONTROL
+    # =========================================================
+
+    st.subheader("Scheduler Control")
+
+    st.caption(
+        "Submitting a workload does not execute it. "
+        "Use Execute Queue to run Python, C/C++ and "
+        "file-transfer workloads in the displayed order."
+    )
+
+    execute_col, history_col = st.columns(2)
+
+    with execute_col:
+
+        execute_clicked = st.button(
+            "Execute Queue",
+            type="primary",
+            use_container_width=True,
+            disabled=(
+                not runnable_tasks
+                or bool(running_tasks)
+            ),
+        )
+
+    with history_col:
+
+        clear_history_clicked = st.button(
+            "Clear Selection History",
+            use_container_width=True,
+        )
+
+    if clear_history_clicked:
+
+        st.session_state[
+            "scheduler_selection_order"
+        ] = []
+
+        st.rerun()
+
+    # =========================================================
+    # DATABASE HELPER
+    # =========================================================
+
+    def persist_execution(task):
+
+        db = DatabaseManager()
+
+        try:
+
+            db.update_workload_status(task)
+
+            db.save_execution_history(task)
+
+            return True, None
+
+        except Exception as error:
+
+            return False, str(error)
+
+        finally:
+
+            db.close()
+
+    # =========================================================
+    # EXECUTE QUEUE
+    # =========================================================
+
+    if execute_clicked:
+
+        execution_log = st.session_state.setdefault(
+            "scheduler_selection_order",
+            []
+        )
+
+        executor = WorkloadExecutor()
+
+        progress = st.progress(0.0)
+
+        status = st.empty()
+
+        current_ready_tasks = (
+            task_manager.get_ready_tasks()
+        )
+
+        queue = build_execution_order(
             [
-                "FCFS",
-                "SJF",
-                "Priority",
-                "Round Robin",
-                "Adaptive"
+                task
+                for task in current_ready_tasks
+                if is_executable(task)
             ]
         )
 
-        if algorithm == "Round Robin":
+        total = len(queue)
 
-            time_quantum = st.number_input(
-                "Time Quantum",
-                min_value=1,
-                value=2,
-                step=1,
-                help="Time slice used by the application-level Round Robin scheduler."
+        successful = 0
+
+        unsuccessful = 0
+
+        processed = 0
+
+        if total == 0:
+
+            st.warning(
+                "There are no executable READY workloads."
             )
 
-            st.caption(
-                f"Current time quantum: {time_quantum}"
-            )
+        else:
 
-        descriptions = {
+            for task, actual_algorithm in queue:
 
-            "FCFS":
-                "The next workload is selected according to arrival order.",
+                if task.state != "READY":
 
-            "SJF":
-                "The workload with the shortest estimated execution time is selected.",
+                    continue
 
-            "Priority":
-                "The workload with the highest priority is selected first. Priority 1 is highest.",
+                processed += 1
 
-            "Round Robin":
-                "Workloads are handled using a rotating READY queue and a time quantum.",
+                status.info(
+                    f"Executing workload {processed} "
+                    f"of {total}: {task.workload_name}"
+                )
 
-            "Adaptive":
-                "The scheduler can use previous workload history and current system conditions."
-        }
+                execution_log.append(
+                    {
+                        "task_id": task.task_id,
+                        "workload": task.workload_name,
+                        "algorithm": actual_algorithm,
+                        "type": task.workload_type,
+                    }
+                )
 
-        st.info(descriptions[algorithm])
+                task.scheduler_name = actual_algorithm
 
+                execution_error = None
 
-    # ==========================================
-    # AUTOMATIC SCHEDULER CONFIGURATION
-    # ==========================================
-    else:
+                # -----------------------------------------
+                # ACTUAL WORKLOAD EXECUTION
+                # -----------------------------------------
 
-        algorithm = "System Selected"
+                try:
 
-        st.info(
-            "Automatic Scheduler Switching is enabled. "
-            "SysNexa will select a suitable scheduling algorithm "
-            "based on workload characteristics, READY queue information, "
-            "workload history and current system conditions."
+                    executor.execute(
+                        task,
+                        getattr(task, "source_code", ""),
+                        timeout_seconds=int(
+                            getattr(
+                                task,
+                                "execution_timeout",
+                                30
+                            )
+                        ),
+                    )
+
+                except Exception as error:
+
+                    execution_error = str(error)
+
+                    task.state = "FAILED"
+
+                    task.failure_reason = execution_error
+
+                    if getattr(
+                        task,
+                        "completion_time",
+                        None
+                    ) is None:
+
+                        task.completion_time = datetime.now()
+
+                    st.error(
+                        f"Could not execute "
+                        f"{task.workload_name}: "
+                        f"{execution_error}"
+                    )
+
+                # -----------------------------------------
+                # SAVE EXECUTION HISTORY
+                # -----------------------------------------
+
+                saved, db_error = persist_execution(task)
+
+                if not saved:
+
+                    st.error(
+                        f"Database save failed for "
+                        f"{task.workload_name}: "
+                        f"{db_error}"
+                    )
+
+                # -----------------------------------------
+                # EXECUTION RESULT
+                # -----------------------------------------
+
+                if task.state == "COMPLETED":
+
+                    successful += 1
+
+                    st.success(
+                        f"{task.workload_name} "
+                        "completed successfully."
+                    )
+
+                else:
+
+                    unsuccessful += 1
+
+                    if execution_error is None:
+
+                        st.error(
+                            f"{task.workload_name} "
+                            f"finished with state "
+                            f"{task.state}."
+                        )
+
+                stdout_text = getattr(
+                    task,
+                    "stdout",
+                    ""
+                )
+
+                stderr_text = getattr(
+                    task,
+                    "stderr",
+                    ""
+                )
+
+                if stdout_text:
+
+                    with st.expander(
+                        f"Workload output — "
+                        f"{task.workload_name}"
+                    ):
+
+                        st.code(
+                            stdout_text,
+                            language="text"
+                        )
+
+                if stderr_text:
+
+                    with st.expander(
+                        f"Workload errors — "
+                        f"{task.workload_name}"
+                    ):
+
+                        st.code(
+                            stderr_text,
+                            language="text"
+                        )
+
+                progress.progress(
+                    processed / total
+                )
+
+            st.session_state["last_queue_result"] = {
+                "successful": successful,
+                "unsuccessful": unsuccessful,
+            }
+
+            st.rerun()
+
+    # =========================================================
+    # LAST QUEUE RESULT
+    # =========================================================
+
+    last_result = st.session_state.get(
+        "last_queue_result"
+    )
+
+    if last_result:
+
+        message = (
+            f"Queue finished. "
+            f"Successful: {last_result['successful']}; "
+            f"Unsuccessful: {last_result['unsuccessful']}."
         )
 
-        st.markdown("""
-        <div class="info-box">
-            <strong style="color:#60a5fa; font-size:15px;">
-                🔄 Automatic Scheduler Switching
-            </strong>
-            <br><br>
-            <span style="color:#cbd5e1; font-size:13px;">
-                The system can select FCFS, SJF, Priority, Round Robin
-                or Adaptive scheduling depending on the characteristics
-                of the current workload.
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
+        if last_result["unsuccessful"] > 0:
 
+            st.warning(message)
 
-    # ==========================================
-    # READY QUEUE
-    # ==========================================
-    st.markdown(
-        '<div class="section-title">READY Queue</div>',
-        unsafe_allow_html=True
+        else:
+
+            st.success(message)
+
+    # =========================================================
+    # SELECTION / EXECUTION HISTORY
+    # =========================================================
+
+    st.subheader("Selection / Execution Order")
+
+    selection_order = st.session_state.get(
+        "scheduler_selection_order",
+        []
     )
 
-    st.info(
-        "No workloads are currently available in the READY queue."
+    if selection_order:
+
+        selection_data = [
+            {
+                "Position": index,
+                "Task ID": item.get("task_id", ""),
+                "Workload": item.get("workload", ""),
+                "Type": item.get("type", ""),
+                "Algorithm": item.get("algorithm", ""),
+            }
+
+            for index, item in enumerate(
+                selection_order,
+                start=1
+            )
+        ]
+
+        st.dataframe(
+            pd.DataFrame(selection_data),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    else:
+
+        st.info(
+            "No workloads have been selected "
+            "for execution yet."
+        )
+
+    # =========================================================
+    # COMPLETED WORKLOADS
+    # =========================================================
+
+    st.subheader("Completed Workloads")
+
+    if completed_tasks:
+
+        completed_data = [
+            {
+                "Task ID": task.task_id,
+                "Workload": task.workload_name,
+                "Type": task.workload_type,
+                "PID": task.pid,
+                "Exit Code": task.exit_code,
+                "Execution Time (s)": task.execution_time,
+                "State": task.state,
+            }
+
+            for task in completed_tasks
+        ]
+
+        st.dataframe(
+            pd.DataFrame(completed_data),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    else:
+
+        st.info("No completed workloads available yet.")
+
+    # =========================================================
+    # FILE TRANSFER RESULTS
+    # =========================================================
+
+    st.subheader("File Transfer Results")
+
+    transfer_tasks = [
+        task
+        for task in tasks
+        if task.workload_type == "file_transfer"
+        and task.state in ("COMPLETED", "FAILED")
+    ]
+
+    if transfer_tasks:
+
+        transfer_rows = []
+
+        for task in transfer_tasks:
+
+            transferred_bytes = getattr(
+                task,
+                "transferred_bytes",
+                None
+            )
+
+            transfer_time = getattr(
+                task,
+                "transfer_time_seconds",
+                None
+            )
+
+            transfer_speed = getattr(
+                task,
+                "transfer_speed",
+                None
+            )
+
+            cpu_percent = getattr(
+                task,
+                "cpu_percent",
+                None
+            )
+
+            memory_peak = getattr(
+                task,
+                "memory_peak_bytes",
+                None
+            )
+
+            transfer_rows.append(
+                {
+                    "Task ID": task.task_id,
+
+                    "Workload": task.workload_name,
+
+                    "Operation": getattr(
+                        task,
+                        "operation",
+                        "N/A"
+                    ),
+
+                    "Algorithm": getattr(
+                        task,
+                        "scheduler_name",
+                        "N/A"
+                    ),
+
+                    "PID": getattr(
+                        task,
+                        "pid",
+                        None
+                    ),
+
+                    "Transferred Bytes":
+                        transferred_bytes,
+
+                    "File Size (KB)": (
+                        round(
+                            transferred_bytes / 1024,
+                            2
+                        )
+                        if transferred_bytes is not None
+                        else None
+                    ),
+
+                    "Transfer Time (s)": (
+                        round(transfer_time, 6)
+                        if transfer_time is not None
+                        else None
+                    ),
+
+                    "Transfer Speed (KB/s)": (
+                        round(
+                            transfer_speed / 1024,
+                            2
+                        )
+                        if transfer_speed is not None
+                        else None
+                    ),
+
+                    "CPU Usage (%)": (
+                        round(cpu_percent, 2)
+                        if cpu_percent is not None
+                        else None
+                    ),
+
+                    "Peak Memory (MB)": (
+                        round(
+                            memory_peak / (1024 ** 2),
+                            2
+                        )
+                        if memory_peak is not None
+                        else None
+                    ),
+
+                    "Destination": getattr(
+                        task,
+                        "transfer_destination",
+                        None
+                    ),
+
+                    "State": task.state,
+
+                    "Metrics Error": getattr(
+                        task,
+                        "transfer_metrics_error",
+                        None
+                    ),
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(transfer_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.caption(
+            "Transfer speed is calculated using actual "
+            "transferred bytes divided by measured "
+            "transfer duration. Upload speed measures "
+            "the local WSL decoding and writing operation."
+        )
+
+    else:
+
+        st.info(
+            "No file-transfer workloads have finished yet."
+        )
+
+    # =========================================================
+    # WORKLOAD OUTPUT
+    # =========================================================
+
+    finished_tasks = [
+        task
+        for task in tasks
+        if task.state in ("COMPLETED", "FAILED")
+    ]
+
+    if finished_tasks:
+
+        with st.expander("View Workload Output"):
+
+            selected_task_id = st.selectbox(
+                "Select workload",
+                [
+                    task.task_id
+                    for task in finished_tasks
+                ],
+                format_func=lambda task_id: next(
+                    (
+                        task.workload_name
+                        + " — "
+                        + task_id
+                        for task in finished_tasks
+                        if task.task_id == task_id
+                    ),
+                    task_id
+                ),
+                key="scheduler_output_task",
+            )
+
+            selected_task = next(
+                (
+                    task
+                    for task in finished_tasks
+                    if task.task_id == selected_task_id
+                ),
+                None
+            )
+
+            if selected_task is not None:
+
+                stdout_text = getattr(
+                    selected_task,
+                    "stdout",
+                    ""
+                )
+
+                stderr_text = getattr(
+                    selected_task,
+                    "stderr",
+                    ""
+                )
+
+                st.markdown("**Output**")
+
+                if stdout_text:
+
+                    st.code(
+                        stdout_text,
+                        language="text"
+                    )
+
+                else:
+
+                    st.info("No standard output.")
+
+                if stderr_text:
+
+                    st.markdown("**Errors**")
+
+                    st.code(
+                        stderr_text,
+                        language="text"
+                    )
+
+    # =========================================================
+    # FAILED WORKLOADS
+    # =========================================================
+
+    st.subheader("Failed Workloads")
+
+    if failed_tasks:
+
+        failed_data = [
+            {
+                "Task ID": task.task_id,
+
+                "Workload": task.workload_name,
+
+                "Type": task.workload_type,
+
+                "Exit Code": task.exit_code,
+
+                "Failure Reason": getattr(
+                    task,
+                    "failure_reason",
+                    None
+                ),
+
+                "Timed Out": getattr(
+                    task,
+                    "timed_out",
+                    False
+                ),
+
+                "Retry Count": getattr(
+                    task,
+                    "retry_count",
+                    0
+                ),
+            }
+
+            for task in failed_tasks
+        ]
+
+        st.dataframe(
+            pd.DataFrame(failed_data),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    else:
+
+        st.info("No failed workloads available.")
+
+    # =========================================================
+    # FAILURE AND RECOVERY STATUS
+    # =========================================================
+
+    st.subheader("Failure & Recovery Status")
+
+    retry_attempts = sum(
+        getattr(task, "retry_count", 0)
+        for task in tasks
     )
 
-
-    # ==========================================
-    # SUBMISSION ORDER VS EXECUTION ORDER
-    # ==========================================
-    st.markdown(
-        '<div class="section-title">'
-        'Submission Order vs Selection Order'
-        '</div>',
-        unsafe_allow_html=True
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        st.subheader("📥 Submission Order")
-
-        st.markdown("""
-        <div class="order-box">
-            No workloads submitted yet.
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-
-        st.subheader("▶️ Selection / Execution Order")
-
-        st.markdown("""
-        <div class="order-box">
-            No workloads selected yet.
-        </div>
-        """, unsafe_allow_html=True)
-
-
-    # ==========================================
-    # COMPLETED TASKS
-    # ==========================================
-    st.markdown(
-        '<div class="section-title">Completed Workloads</div>',
-        unsafe_allow_html=True
-    )
-
-    st.info(
-        "No completed workloads available yet."
-    )
-
-
-    # ==========================================
-    # FAILED / RECOVERY STATUS
-    # ==========================================
-    st.markdown(
-        '<div class="section-title">Failure & Recovery Status</div>',
-        unsafe_allow_html=True
-    )
+    recovered_tasks = [
+        task
+        for task in tasks
+        if getattr(task, "retry_count", 0) > 0
+        and task.state == "COMPLETED"
+    ]
 
     col1, col2, col3 = st.columns(3)
 
-    with col1:
-        st.metric(
-            "Failed Workloads",
-            "0"
-        )
+    col1.metric(
+        "Failed Workloads",
+        len(failed_tasks)
+    )
 
-    with col2:
-        st.metric(
-            "Retry Attempts",
-            "0"
-        )
+    col2.metric(
+        "Retry Attempts",
+        retry_attempts
+    )
 
-    with col3:
-        st.metric(
-            "Recovered Workloads",
-            "0"
-        )
+    col3.metric(
+        "Recovered Workloads",
+        len(recovered_tasks)
+    )
 
-    st.info(
-        "Failed workloads can be returned to the READY queue for "
-        "retry when automatic recovery is enabled."
+    st.caption(
+        "Retry counts are displayed from task records. "
+        "Automatic recovery requires retry logic "
+        "in the execution workflow."
     )
 
 
-    # ==========================================
-    # SCHEDULER ACTION
-    # ==========================================
-    st.markdown(
-        '<div class="section-title">Scheduler Control</div>',
-        unsafe_allow_html=True
-    )
+if __name__ == "__main__":
 
-    if st.button(
-        "▶️ Select Next Workload",
-        use_container_width=True,
-        type="primary"
-    ):
-        st.warning(
-            "Backend scheduler is not connected yet."
-        )
-
-
-    # ==========================================
-    # IMPORTANT PROJECT NOTE
-    # ==========================================
-    st.markdown("""
-    <div class="info-box">
-        <strong style="color:#60a5fa; font-size:15px;">
-            ⚙️ Runtime Scheduling
-        </strong>
-        <br><br>
-        <span style="color:#cbd5e1; font-size:13px;">
-            The application scheduler selects the next workload
-            from the READY queue. The selected workload is then
-            passed to the workload executor for execution in
-            the Linux environment.
-            <br><br>
-            In Automatic mode, SysNexa can switch between supported
-            scheduling algorithms based on workload characteristics
-            and system conditions.
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-    # ==========================================
-    # DEVELOPMENT STATUS
-    # ==========================================
-    st.divider()
-
-    st.success(
-        "Development Status: Scheduler frontend ready. "
-        "Runtime scheduling data will appear after backend integration."
-    )
+    show_scheduler()

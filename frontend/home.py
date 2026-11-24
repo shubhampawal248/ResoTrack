@@ -1,5 +1,9 @@
+
 import streamlit as st
-import time
+import pandas as pd
+import psutil
+import shutil
+import os
 
 
 def show_home():
@@ -9,8 +13,6 @@ def show_home():
     # ---------------------------------------------------------
     st.markdown("""
     <style>
-
-    /* Main background */
     .stApp {
         background:
             radial-gradient(circle at 10% 10%, rgba(0, 255, 200, 0.08), transparent 25%),
@@ -19,12 +21,7 @@ def show_home():
         color: #f5f7fa;
     }
 
-    /* Hide default Streamlit decoration */
-    #MainMenu {
-        visibility: hidden;
-    }
-
-    footer {
+    #MainMenu, footer {
         visibility: hidden;
     }
 
@@ -32,19 +29,12 @@ def show_home():
         background: transparent !important;
     }
 
-    /* Main title */
     .hero-title {
         font-size: 48px;
         font-weight: 800;
         letter-spacing: -2px;
         margin-bottom: 5px;
-        background: linear-gradient(
-            90deg,
-            #ffffff,
-            #8fffe0,
-            #8ca7ff,
-            #ffffff
-        );
+        background: linear-gradient(90deg, #ffffff, #8fffe0, #8ca7ff, #ffffff);
         background-size: 300% auto;
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
@@ -52,12 +42,8 @@ def show_home():
     }
 
     @keyframes gradientMove {
-        0% {
-            background-position: 0% center;
-        }
-        100% {
-            background-position: 300% center;
-        }
+        0% { background-position: 0% center; }
+        100% { background-position: 300% center; }
     }
 
     .hero-subtitle {
@@ -66,7 +52,6 @@ def show_home():
         margin-bottom: 25px;
     }
 
-    /* Status badge */
     .status-badge {
         display: inline-flex;
         align-items: center;
@@ -91,29 +76,15 @@ def show_home():
     }
 
     @keyframes pulse {
-        0% {
-            transform: scale(1);
-            opacity: 1;
-        }
-        50% {
-            transform: scale(1.5);
-            opacity: 0.5;
-        }
-        100% {
-            transform: scale(1);
-            opacity: 1;
-        }
+        0% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.5); opacity: 0.5; }
+        100% { transform: scale(1); opacity: 1; }
     }
 
-    /* KPI cards */
     .metric-card {
         padding: 20px;
         border-radius: 18px;
-        background: linear-gradient(
-            145deg,
-            rgba(255,255,255,0.07),
-            rgba(255,255,255,0.025)
-        );
+        background: linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.025));
         border: 1px solid rgba(255,255,255,0.09);
         box-shadow: 0 8px 30px rgba(0,0,0,0.25);
         transition: all 0.3s ease;
@@ -123,9 +94,7 @@ def show_home():
     .metric-card:hover {
         transform: translateY(-5px);
         border-color: rgba(120,255,220,0.35);
-        box-shadow:
-            0 15px 40px rgba(0,0,0,0.35),
-            0 0 20px rgba(0,255,200,0.08);
+        box-shadow: 0 15px 40px rgba(0,0,0,0.35), 0 0 20px rgba(0,255,200,0.08);
     }
 
     .metric-label {
@@ -146,7 +115,6 @@ def show_home():
         margin-top: 8px;
     }
 
-    /* Section headings */
     .section-title {
         font-size: 22px;
         font-weight: 700;
@@ -161,7 +129,6 @@ def show_home():
         margin-bottom: 18px;
     }
 
-    /* Workflow */
     .workflow-card {
         padding: 18px;
         border-radius: 16px;
@@ -194,7 +161,6 @@ def show_home():
         margin-top: 5px;
     }
 
-    /* Process table */
     .process-card {
         padding: 15px 18px;
         border-radius: 14px;
@@ -213,7 +179,6 @@ def show_home():
         font-size: 12px;
     }
 
-    /* Footer */
     .dashboard-footer {
         text-align: center;
         color: #667181;
@@ -222,19 +187,67 @@ def show_home():
         padding: 20px;
         border-top: 1px solid rgba(255,255,255,0.07);
     }
-
     </style>
     """, unsafe_allow_html=True)
 
+    # ---------------------------------------------------------
+    # GET LIVE SYSTEM RESOURCES
+    # ---------------------------------------------------------
+    cpu_percent = psutil.cpu_percent(interval=0.3)
+    memory_percent = psutil.virtual_memory().percent
+
+    try:
+        disk_percent = psutil.disk_usage(os.path.abspath(os.sep)).percent
+    except Exception:
+        disk_percent = 0
+
+    def resource_status(value):
+        if value >= 85:
+            return "● High usage"
+        if value >= 65:
+            return "● Elevated"
+        return "● Normal"
+
+    # ---------------------------------------------------------
+    # GET SHARED TASK RECORDS
+    # ---------------------------------------------------------
+    task_manager = st.session_state.get("task_manager")
+
+    if task_manager is not None:
+        tasks = task_manager.get_all_tasks()
+    else:
+        tasks = []
+        st.warning(
+            "TaskManager is not initialized. Check app.py to ensure "
+            "all pages use the same TaskManager."
+        )
+
+    state_counts = {
+        "READY": 0,
+        "RUNNING": 0,
+        "COMPLETED": 0,
+        "WAITING": 0,
+        "FAILED": 0,
+    }
+
+    for task in tasks:
+        state = str(getattr(task, "state", "UNKNOWN")).upper()
+
+        if state in state_counts:
+            state_counts[state] += 1
+        elif state == "PENDING":
+            state_counts["READY"] += 1
+
+    active_tasks = state_counts["READY"] + state_counts["RUNNING"]
+    running_count = state_counts["RUNNING"]
 
     # ---------------------------------------------------------
     # HERO SECTION
     # ---------------------------------------------------------
-
     st.markdown("""
     <div class="status-badge">
         <span class="status-dot"></span>
-        SYSTEM MONITORING ACTIVE
+        SYSTEM MONITORIN ACTIVE
     </div>
     """, unsafe_allow_html=True)
 
@@ -250,54 +263,43 @@ def show_home():
         unsafe_allow_html=True
     )
 
+    st.caption("Live resource readings and current workload records.")
 
     # ---------------------------------------------------------
     # TOP METRICS
     # ---------------------------------------------------------
-
     col1, col2, col3, col4 = st.columns(4)
 
-    with col1:
-        st.markdown("""
-        <div class="metric-card">
-            <div class="metric-label">CPU UTILIZATION</div>
-            <div class="metric-value">42%</div>
-            <div class="metric-change">● Normal</div>
-        </div>
-        """, unsafe_allow_html=True)
+    metric_values = [
+        ("CPU UTILIZATION", cpu_percent, resource_status(cpu_percent)),
+        ("MEMORY USAGE", memory_percent, resource_status(memory_percent)),
+        ("DISK USAGE", disk_percent, resource_status(disk_percent)),
+    ]
 
-    with col2:
-        st.markdown("""
-        <div class="metric-card">
-            <div class="metric-label">MEMORY USAGE</div>
-            <div class="metric-value">61%</div>
-            <div class="metric-change">● Stable</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col3:
-        st.markdown("""
-        <div class="metric-card">
-            <div class="metric-label">DISK USAGE</div>
-            <div class="metric-value">38%</div>
-            <div class="metric-change">● Normal</div>
-        </div>
-        """, unsafe_allow_html=True)
+    for column, (label, value, status_text) in zip(
+        [col1, col2, col3], metric_values
+    ):
+        with column:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">{label}</div>
+                <div class="metric-value">{value:.0f}%</div>
+                <div class="metric-change">{status_text}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
     with col4:
-        st.markdown("""
+        st.markdown(f"""
         <div class="metric-card">
             <div class="metric-label">ACTIVE TASKS</div>
-            <div class="metric-value">04</div>
-            <div class="metric-change">● 2 Running</div>
+            <div class="metric-value">{active_tasks:02d}</div>
+            <div class="metric-change">● {running_count} Running</div>
         </div>
         """, unsafe_allow_html=True)
-
 
     # ---------------------------------------------------------
     # SYSTEM OVERVIEW
     # ---------------------------------------------------------
-
     st.markdown(
         '<div class="section-title">System Overview</div>',
         unsafe_allow_html=True
@@ -313,41 +315,34 @@ def show_home():
     col1, col2 = st.columns(2)
 
     with col1:
-
         st.markdown("#### ⚙️ Workload States")
 
-        state_data = {
-            "READY": 2,
-            "RUNNING": 2,
-            "COMPLETED": 8,
-            "WAITING": 1
-        }
+        state_data = pd.DataFrame({
+            "State": ["READY", "RUNNING", "COMPLETED", "WAITING", "FAILED"],
+            "Tasks": [
+                state_counts["READY"],
+                state_counts["RUNNING"],
+                state_counts["COMPLETED"],
+                state_counts["WAITING"],
+                state_counts["FAILED"],
+            ],
+        }).set_index("State")
 
-        st.bar_chart(
-            state_data,
-            height=280
-        )
+        st.bar_chart(state_data, height=280)
 
     with col2:
-
         st.markdown("#### 📊 Resource Utilization")
 
-        resource_data = {
-            "CPU": 42,
-            "RAM": 61,
-            "Disk": 38
-        }
+        resource_data = pd.DataFrame({
+            "Resource": ["CPU", "RAM", "Disk"],
+            "Usage (%)": [cpu_percent, memory_percent, disk_percent],
+        }).set_index("Resource")
 
-        st.bar_chart(
-            resource_data,
-            height=280
-        )
-
+        st.bar_chart(resource_data, height=280)
 
     # ---------------------------------------------------------
     # CURRENT PROCESSES
     # ---------------------------------------------------------
-
     st.markdown(
         '<div class="section-title">Current Processes</div>',
         unsafe_allow_html=True
@@ -360,34 +355,41 @@ def show_home():
         unsafe_allow_html=True
     )
 
-    processes = [
-        ("P001", "sorting.py", "RUNNING", "Priority 1"),
-        ("P002", "database_query.sql", "RUNNING", "Priority 2"),
-        ("P003", "file_processing.py", "READY", "Priority 3"),
-        ("P004", "calculation.cpp", "READY", "Priority 2")
-    ]
+    if tasks:
+        for task in tasks:
+            pid = getattr(task, "pid", None)
+            name = getattr(task, "workload_name", "Unnamed workload")
+            state = str(getattr(task, "state", "UNKNOWN")).upper()
+            priority = getattr(task, "priority", "N/A")
+            task_id = getattr(task, "task_id", "N/A")
 
-    for pid, name, state, priority in processes:
+            if state == "RUNNING":
+                icon = "🟢"
+            elif state == "COMPLETED":
+                icon = "🔵"
+            elif state == "FAILED":
+                icon = "🔴"
+            else:
+                icon = "🟡"
 
-        if state == "RUNNING":
-            icon = "🟢"
-        else:
-            icon = "🟡"
+            displayed_pid = str(pid) if pid is not None else str(task_id)
 
-        st.markdown(f"""
-        <div class="process-card">
-            <span class="process-name">{icon} {pid} — {name}</span>
-            <span class="process-info">
-                &nbsp;&nbsp; {state} &nbsp; | &nbsp; {priority}
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
-
+            st.markdown(f"""
+            <div class="process-card">
+                <span class="process-name">
+                    {icon} {displayed_pid} — {name}
+                </span>
+                <span class="process-info">
+                    &nbsp;&nbsp; {state} &nbsp; | &nbsp; Priority {priority}
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No workloads have been submitted yet.")
 
     # ---------------------------------------------------------
     # WORKFLOW
     # ---------------------------------------------------------
-
     st.markdown(
         '<div class="section-title">SysNexa Runtime Workflow</div>',
         unsafe_allow_html=True
@@ -408,13 +410,11 @@ def show_home():
         ("🧠", "Scheduler", "Selects next task"),
         ("⚡", "Resource Check", "Checks resources"),
         ("🐧", "Linux", "Actual execution"),
-        ("🗄️", "PostgreSQL", "Stores results")
+        ("🗄️", "PostgreSQL", "Stores results"),
     ]
 
     for column, (icon, name, description) in zip(workflow, steps):
-
         with column:
-
             st.markdown(f"""
             <div class="workflow-card">
                 <div class="workflow-icon">{icon}</div>
@@ -423,11 +423,9 @@ def show_home():
             </div>
             """, unsafe_allow_html=True)
 
-
     # ---------------------------------------------------------
     # ADVANCED FEATURES
     # ---------------------------------------------------------
-
     st.markdown(
         '<div class="section-title">Advanced Intelligence</div>',
         unsafe_allow_html=True
@@ -445,36 +443,26 @@ def show_home():
     with feature2:
         st.info(
             "⚡ **Resource-Aware Admission**\n\n"
-            "Checks current CPU, memory and disk conditions "
-            "before allowing workloads to run."
+            "Live resource readings are available. Admission control "
+            "must be connected separately to enforce resource limits."
         )
 
     with feature3:
         st.info(
             "🔍 **Bottleneck Analysis**\n\n"
-            "Analyzes monitoring and database metrics "
-            "to identify possible performance bottlenecks."
+            "CPU, memory, disk and workload states are displayed. "
+            "Historical bottleneck analysis requires stored measurements."
         )
-
-
-    # ---------------------------------------------------------
-    # DEMO NOTICE
-    # ---------------------------------------------------------
-
-    st.markdown("---")
-
-    st.warning(
-        "⚠️ **Prototype Mode:** "
-        "The values shown on this Home dashboard are currently "
-        "demo values. They will later be connected to real "
-        "Linux/Ubuntu process information, psutil monitoring "
-        "and PostgreSQL data."
-    )
-
 
     # ---------------------------------------------------------
     # FOOTER
     # ---------------------------------------------------------
+    st.markdown("---")
+
+    st.caption(
+        "Resource values are sampled from the machine running Streamlit. "
+        "They are not necessarily limited to the workload processes."
+    )
 
     st.markdown("""
     <div class="dashboard-footer">

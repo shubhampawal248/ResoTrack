@@ -1,14 +1,39 @@
+
 import streamlit as st
 
 
 def show_process_monitor():
+    # ==========================================
+    # GET SHARED TASK RECORDS
+    # ==========================================
+    task_manager = st.session_state.get("task_manager")
+
+    if task_manager is not None:
+        tasks = task_manager.get_all_tasks()
+    else:
+        tasks = []
+
+    total_processes = len(tasks)
+    ready_count = sum(task.state == "READY" for task in tasks)
+    running_count = sum(task.state == "RUNNING" for task in tasks)
+    completed_count = sum(task.state == "COMPLETED" for task in tasks)
+    failed_count = sum(task.state == "FAILED" for task in tasks)
+
+    retry_attempts = sum(
+        getattr(task, "retry_count", 0) for task in tasks
+    )
+
+    recovered_count = sum(
+        task.state == "COMPLETED"
+        and getattr(task, "retry_count", 0) > 0
+        for task in tasks
+    )
 
     # ==========================================
     # PAGE STYLING
     # ==========================================
     st.markdown("""
     <style>
-
     .page-title {
         font-size: 32px;
         font-weight: 700;
@@ -62,10 +87,8 @@ def show_process_monitor():
         padding: 16px;
         margin-top: 18px;
     }
-
     </style>
     """, unsafe_allow_html=True)
-
 
     # ==========================================
     # PAGE HEADER
@@ -77,11 +100,10 @@ def show_process_monitor():
 
     st.markdown(
         '<div class="page-subtitle">'
-        'Monitor submitted workloads and their runtime process states.'
+        'Monitor submitted workloads and their individual resource usage.'
         '</div>',
         unsafe_allow_html=True
     )
-
 
     # ==========================================
     # PROCESS SUMMARY
@@ -91,48 +113,24 @@ def show_process_monitor():
         unsafe_allow_html=True
     )
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    summary_cards = [
+        ("Total Processes", total_processes),
+        ("READY", ready_count),
+        ("RUNNING", running_count),
+        ("COMPLETED", completed_count),
+        ("FAILED", failed_count)
+    ]
 
-    with col1:
-        st.markdown("""
-        <div class="status-card">
-            <div class="status-label">Total Processes</div>
-            <div class="status-value">0</div>
-        </div>
-        """, unsafe_allow_html=True)
+    columns = st.columns(5)
 
-    with col2:
-        st.markdown("""
-        <div class="status-card">
-            <div class="status-label">READY</div>
-            <div class="status-value">0</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col3:
-        st.markdown("""
-        <div class="status-card">
-            <div class="status-label">RUNNING</div>
-            <div class="status-value">0</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col4:
-        st.markdown("""
-        <div class="status-card">
-            <div class="status-label">COMPLETED</div>
-            <div class="status-value">0</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col5:
-        st.markdown("""
-        <div class="status-card">
-            <div class="status-label">FAILED</div>
-            <div class="status-value">0</div>
-        </div>
-        """, unsafe_allow_html=True)
-
+    for col, (label, value) in zip(columns, summary_cards):
+        with col:
+            st.markdown(f"""
+            <div class="status-card">
+                <div class="status-label">{label}</div>
+                <div class="status-value">{value}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
     # ==========================================
     # CURRENT RUNNING PROCESS
@@ -142,10 +140,19 @@ def show_process_monitor():
         unsafe_allow_html=True
     )
 
-    st.info(
-        "No process is currently running."
-    )
+    running_tasks = [
+        task for task in tasks if task.state == "RUNNING"
+    ]
 
+    if running_tasks:
+        for task in running_tasks:
+            st.info(
+                f"Workload: {task.workload_name} | "
+                f"Task ID: {task.task_id} | "
+                f"PID: {getattr(task, 'pid', None) or 'Not assigned'}"
+            )
+    else:
+        st.info("No process is currently running.")
 
     # ==========================================
     # PROCESS TABLE
@@ -155,45 +162,175 @@ def show_process_monitor():
         unsafe_allow_html=True
     )
 
-    process_data = {
-        "Task ID": [],
-        "Workload": [],
-        "PID": [],
-        "State": [],
-        "Priority": [],
-        "Arrival Time": [],
-        "Start Time": [],
-        "Completion Time": [],
-        "Execution Time": [],
-        "Exit Code": [],
-        "Retry Count": []
-    }
+    process_data = []
 
-    st.dataframe(
-        process_data,
-        use_container_width=True,
-        hide_index=True
-    )
+    for task in tasks:
+        memory_bytes = getattr(task, "memory_peak_bytes", None)
 
+        process_data.append({
+            "Task ID": task.task_id,
+            "Workload": task.workload_name,
+            "Type": getattr(task, "workload_type", "Unknown"),
+            "PID": getattr(task, "pid", None),
+            "State": task.state,
+            "Priority": getattr(task, "priority", None),
+            "Arrival Time": getattr(task, "arrival_time", None),
+            "Start Time": getattr(task, "start_time", None),
+            "Completion Time": getattr(task, "completion_time", None),
+            "Execution Time (s)": (
+                round(task.execution_time, 3)
+                if getattr(task, "execution_time", None) is not None
+                else None
+            ),
+            "CPU Time (s)": (
+                round(task.cpu_time_seconds, 3)
+                if getattr(task, "cpu_time_seconds", None) is not None
+                else None
+            ),
+            "CPU Usage (%)": (
+                round(task.cpu_percent, 1)
+                if getattr(task, "cpu_percent", None) is not None
+                else None
+            ),
+            "Peak Memory (MB)": (
+                round(memory_bytes / (1024 ** 2), 2)
+                if memory_bytes is not None
+                else None
+            ),
+            "Exit Code": getattr(task, "exit_code", None),
+            "Retry Count": getattr(task, "retry_count", 0)
+        })
+
+    if process_data:
+        st.dataframe(
+            process_data,
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.caption("No workloads have been submitted.")
 
     # ==========================================
-    # PROCESS DETAILS
+    # INDIVIDUAL TASK USAGE CARDS
     # ==========================================
     st.markdown(
-        '<div class="section-title">Process Details</div>',
+        '<div class="section-title">Individual Task Usage</div>',
         unsafe_allow_html=True
     )
 
-    selected_process = st.selectbox(
-        "Select Process",
-        ["No process available"]
-    )
+    if tasks:
+        for index, task in enumerate(tasks, start=1):
+            execution_time = getattr(task, "execution_time", None)
+            cpu_time = getattr(task, "cpu_time_seconds", None)
+            cpu_percent = getattr(task, "cpu_percent", None)
+            memory_peak = getattr(task, "memory_peak_bytes", None)
+            pid = getattr(task, "pid", None)
+            exit_code = getattr(task, "exit_code", None)
 
-    if selected_process == "No process available":
-        st.caption(
-            "Process details will appear here when workloads are submitted."
-        )
+            memory_mb = (
+                memory_peak / (1024 ** 2)
+                if memory_peak is not None
+                else None
+            )
 
+            state = getattr(task, "state", "UNKNOWN")
+
+            with st.container(border=True):
+                # Task heading and status
+                header_col, status_col = st.columns([3, 1])
+
+                with header_col:
+                    st.subheader(
+                        f"Task {index}: {task.workload_name}"
+                    )
+                    st.caption(f"Task ID: {task.task_id}")
+
+                with status_col:
+                    if state == "COMPLETED":
+                        st.success(state)
+                    elif state == "RUNNING":
+                        st.info(state)
+                    elif state == "FAILED":
+                        st.error(state)
+                    else:
+                        st.warning(state)
+
+                # Resource metrics
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric(
+                        "CPU Usage",
+                        f"{cpu_percent:.1f}%"
+                        if cpu_percent is not None
+                        else "N/A"
+                    )
+
+                with col2:
+                    st.metric(
+                        "Peak Memory",
+                        f"{memory_mb:.2f} MB"
+                        if memory_mb is not None
+                        else "N/A"
+                    )
+
+                with col3:
+                    st.metric(
+                        "Execution Time",
+                        f"{execution_time:.3f} s"
+                        if execution_time is not None
+                        else "N/A"
+                    )
+
+                with col4:
+                    st.metric(
+                        "CPU Time",
+                        f"{cpu_time:.3f} s"
+                        if cpu_time is not None
+                        else "N/A"
+                    )
+
+                st.divider()
+
+                # Additional process information
+                info_col1, info_col2, info_col3 = st.columns(3)
+
+                with info_col1:
+                    st.write(
+                        f"**Linux PID:** "
+                        f"{pid if pid is not None else 'N/A'}"
+                    )
+
+                with info_col2:
+                    st.write(
+                        f"**Priority:** "
+                        f"{getattr(task, 'priority', 'N/A')}"
+                    )
+
+                with info_col3:
+                    st.write(
+                        f"**Exit Code:** "
+                        f"{exit_code if exit_code is not None else 'N/A'}"
+                    )
+
+                # Program output
+                stdout = getattr(task, "stdout", "")
+                stderr = getattr(task, "stderr", "")
+                failure_reason = getattr(task, "failure_reason", None)
+
+                if stdout:
+                    with st.expander("View Program Output"):
+                        st.code(stdout, language="text")
+
+                if stderr:
+                    with st.expander("View Program Errors"):
+                        st.code(stderr, language="text")
+
+                if failure_reason:
+                    st.error(f"Failure reason: {failure_reason}")
+
+    else:
+        st.info("No workloads submitted yet.")
 
     # ==========================================
     # FAILURE DETECTION & RECOVERY
@@ -206,13 +343,12 @@ def show_process_monitor():
     st.markdown("""
     <div class="failure-box">
         <strong style="color:#f87171; font-size:15px;">
-            ⚠️ Failure Monitoring
+            Failure Monitoring
         </strong>
         <br><br>
         <span style="color:#cbd5e1; font-size:13px;">
-            SysNexa checks the result of a workload after its Linux
-            process terminates. A successful process is marked as
-            COMPLETED, while a non-zero exit status is treated as FAILED.
+            Failed tasks are identified from their recorded process state.
+            Automatic failure detection and retry depend on runtime integration.
         </span>
     </div>
     """, unsafe_allow_html=True)
@@ -222,19 +358,19 @@ def show_process_monitor():
     recovery_col1, recovery_col2, recovery_col3 = st.columns(3)
 
     with recovery_col1:
-        st.metric("Failed Operations", "0")
+        st.metric("Failed Operations", failed_count)
 
     with recovery_col2:
-        st.metric("Retry Attempts", "0")
+        st.metric("Retry Attempts", retry_attempts)
 
     with recovery_col3:
-        st.metric("Recovered Operations", "0")
+        st.metric("Recovered Operations", recovered_count)
 
     st.caption(
-        "Failed operations can be returned to the READY queue for a "
-        "controlled retry when recovery is allowed."
+        "These values use the task records currently held in memory. "
+        "This page displays recorded retry information but does not "
+        "perform task retries itself."
     )
-
 
     # ==========================================
     # FAILURE DETAILS
@@ -244,40 +380,44 @@ def show_process_monitor():
         unsafe_allow_html=True
     )
 
-    failure_data = {
-        "Task ID": [],
-        "Workload": [],
-        "PID": [],
-        "Exit Code": [],
-        "Failure Reason": [],
-        "Retry Count": [],
-        "Recovery Status": []
-    }
+    failure_data = []
 
-    st.dataframe(
-        failure_data,
-        use_container_width=True,
-        hide_index=True
-    )
+    for task in tasks:
+        if task.state == "FAILED":
+            failure_data.append({
+                "Task ID": task.task_id,
+                "Workload": task.workload_name,
+                "PID": getattr(task, "pid", None),
+                "Exit Code": getattr(task, "exit_code", None),
+                "Failure Reason": (
+                    getattr(task, "failure_reason", None)
+                    or getattr(task, "stderr", "")
+                    or "Not recorded"
+                ),
+                "Retry Count": getattr(task, "retry_count", 0),
+                "Recovery Status": "Failed"
+            })
 
-    st.caption(
-        "Failure information will appear here when a workload "
-        "fails during runtime."
-    )
-
+    if failure_data:
+        st.dataframe(
+            failure_data,
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.caption(
+            "Failure information will appear here when a task "
+            "is marked FAILED."
+        )
 
     # ==========================================
     # REFRESH
     # ==========================================
     if st.button(
-        "🔄 Refresh Process Status",
+        "Refresh Process Status",
         use_container_width=True
     ):
-        st.info(
-            "Live process monitoring and failure recovery data "
-            "will be connected to the backend."
-        )
-
+        st.rerun()
 
     # ==========================================
     # RUNTIME MONITORING NOTE
@@ -285,14 +425,14 @@ def show_process_monitor():
     st.markdown("""
     <div class="info-box">
         <strong style="color:#60a5fa; font-size:15px;">
-            ⚙️ Runtime Process Monitoring
+            Runtime Process Monitoring
         </strong>
         <br><br>
         <span style="color:#cbd5e1; font-size:13px;">
-            Process ID, process state, start time, completion time,
-            execution time and exit status will be collected
-            automatically when workloads are executed in the
-            Linux environment. These values are not entered manually.
+            Each task card displays the metrics recorded for that task,
+            including Linux PID, exit status, execution time, CPU time,
+            average CPU usage and sampled peak memory.
+            Metrics depend on the executor recording those values.
         </span>
     </div>
     """, unsafe_allow_html=True)

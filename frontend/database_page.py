@@ -1,386 +1,275 @@
+
+import re
+import time
+
+import pandas as pd
 import streamlit as st
+
+from backend.database_manager import DatabaseManager
 
 
 def show_database_monitor():
 
-    # ============================================================
-    # PAGE STYLING
-    # ============================================================
-
-    st.markdown("""
-    <style>
-
-    .db-title {
-        font-size: 36px;
-        font-weight: 700;
-        margin-bottom: 4px;
-    }
-
-    .db-subtitle {
-        color: #9ca3af;
-        font-size: 16px;
-        margin-bottom: 28px;
-    }
-
-    .section-title {
-        font-size: 21px;
-        font-weight: 600;
-        margin-top: 28px;
-        margin-bottom: 14px;
-    }
-
-    .stat-card {
-        background: linear-gradient(145deg, #111827, #0f172a);
-        border: 1px solid #263244;
-        border-radius: 14px;
-        padding: 20px;
-        min-height: 125px;
-    }
-
-    .stat-label {
-        color: #9ca3af;
-        font-size: 13px;
-        margin-bottom: 10px;
-    }
-
-    .stat-value {
-        font-size: 27px;
-        font-weight: 700;
-    }
-
-    .stat-description {
-        color: #6b7280;
-        font-size: 12px;
-        margin-top: 7px;
-    }
-
-    .info-card {
-        background: #111827;
-        border: 1px solid #263244;
-        border-radius: 14px;
-        padding: 20px;
-        line-height: 1.7;
-    }
-
-    .empty-card {
-        background: #0f172a;
-        border: 1px dashed #374151;
-        border-radius: 14px;
-        padding: 35px;
-        text-align: center;
-        color: #9ca3af;
-    }
-
-    .empty-icon {
-        font-size: 35px;
-        margin-bottom: 10px;
-    }
-
-    .status-note {
-        background: #111827;
-        border-left: 4px solid #4f46e5;
-        padding: 14px 18px;
-        border-radius: 8px;
-        color: #d1d5db;
-        margin-top: 20px;
-    }
-
-    </style>
-    """, unsafe_allow_html=True)
-
-    # ============================================================
-    # HEADER
-    # ============================================================
-
-    st.markdown(
-        '<div class="db-title">🗄️ Database Monitor</div>',
-        unsafe_allow_html=True
+    st.title("🗄️ Database Monitor")
+    st.caption(
+        "Monitor MySQL queries, query history, and workload execution."
     )
 
-    st.markdown(
-        '<div class="db-subtitle">'
-        'Monitor PostgreSQL queries, database performance, locks, '
-        'and buffer efficiency.'
-        '</div>',
-        unsafe_allow_html=True
-    )
+    db = DatabaseManager()
 
-    # ============================================================
-    # DATABASE STATUS
-    # ============================================================
+    # ---------------------------------------------------------
+    # DATABASE CONNECTION AND INITIALIZATION
+    # ---------------------------------------------------------
+    try:
+        db.create_tables()
+        connection_status = "Connected"
+        connection_error = None
 
-    st.markdown(
-        '<div class="section-title">Database Status</div>',
-        unsafe_allow_html=True
-    )
+    except Exception as error:
+        connection_status = "Disconnected"
+        connection_error = str(error)
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
 
-    with col1:
-        st.markdown("""
-        <div class="stat-card">
-            <div class="stat-label">DATABASE</div>
-            <div class="stat-value">PostgreSQL</div>
-            <div class="stat-description">Configured database</div>
-        </div>
-        """, unsafe_allow_html=True)
+    col1.metric("Database", "MySQL")
+    col2.metric("Connection", connection_status)
 
-    with col2:
-        st.markdown("""
-        <div class="stat-card">
-            <div class="stat-label">CONNECTION</div>
-            <div class="stat-value">--</div>
-            <div class="stat-description">Waiting for backend</div>
-        </div>
-        """, unsafe_allow_html=True)
+    if connection_error:
+        st.error(f"MySQL connection failed: {connection_error}")
+        st.info(
+            "Check that MySQL is running and your DB_HOST, DB_PORT, "
+            "DB_NAME, DB_USER, and DB_PASSWORD settings are correct."
+        )
+        db.close()
+        return
 
-    with col3:
-        st.markdown("""
-        <div class="stat-card">
-            <div class="stat-label">ACTIVE QUERIES</div>
-            <div class="stat-value">--</div>
-            <div class="stat-description">Runtime database data</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col4:
-        st.markdown("""
-        <div class="stat-card">
-            <div class="stat-label">ACTIVE LOCKS</div>
-            <div class="stat-value">--</div>
-            <div class="stat-description">Current lock entries</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ============================================================
+    # ---------------------------------------------------------
     # QUERY EXECUTION
-    # ============================================================
-
-    st.markdown(
-        '<div class="section-title">Query Execution</div>',
-        unsafe_allow_html=True
-    )
+    # ---------------------------------------------------------
+    st.subheader("Execute a Read-Only SQL Query")
 
     query = st.text_area(
         "SQL Query",
-        placeholder="Enter a SQL query...",
-        height=130
+        placeholder="Example: SELECT * FROM workloads;",
+        height=120,
+        key="database_monitor_query",
     )
+
+    st.caption(
+        "For safety, this interface accepts SELECT and SHOW queries. "
+        "Only one SQL statement can be submitted at a time."
+    )
+
+    def is_read_only_query(sql):
+        # Remove leading whitespace and SQL comments.
+        sql = sql.strip()
+
+        while sql:
+            if sql.startswith("--"):
+                newline = sql.find("\n")
+                if newline == -1:
+                    return ""
+                sql = sql[newline + 1:].lstrip()
+
+            elif sql.startswith("#"):
+                newline = sql.find("\n")
+                if newline == -1:
+                    return ""
+                sql = sql[newline + 1:].lstrip()
+
+            elif sql.startswith("/*"):
+                end = sql.find("*/")
+                if end == -1:
+                    return ""
+                sql = sql[end + 2:].lstrip()
+
+            else:
+                break
+
+        # Allow a single optional trailing semicolon.
+        sql = sql.rstrip()
+        if sql.endswith(";"):
+            sql = sql[:-1].rstrip()
+
+        # Reject multiple statements and SQL that is not SELECT or SHOW.
+        if ";" in sql:
+            return ""
+
+        match = re.match(r"^(SELECT|SHOW)\b", sql, re.IGNORECASE)
+        if not match:
+            return ""
+
+        return sql
 
     if st.button(
         "▶ Execute Query",
-        use_container_width=True
+        type="primary",
+        use_container_width=True,
     ):
-        if query.strip():
-            st.info(
-                "Query execution will be connected to PostgreSQL "
-                "after the database backend is implemented."
-            )
-        else:
+        clean_query = is_read_only_query(query)
+
+        if not query.strip():
             st.warning("Please enter a SQL query.")
 
-    # ============================================================
-    # QUERY PERFORMANCE
-    # ============================================================
+        elif not clean_query:
+            st.error(
+                "Only a single SELECT or SHOW query is allowed."
+            )
 
-    st.markdown(
-        '<div class="section-title">Database Performance</div>',
-        unsafe_allow_html=True
-    )
+        else:
+            cursor = None
+            started = time.perf_counter()
 
-    col1, col2, col3 = st.columns(3)
+            try:
+                connection = db.connect()
+                cursor = connection.cursor(dictionary=True)
 
-    with col1:
-        st.metric(
-            "Query Execution Time",
-            "--"
+                cursor.execute(clean_query)
+                rows = cursor.fetchall()
+                elapsed_ms = (time.perf_counter() - started) * 1000
+
+                db.save_query_history(
+                    query_text=clean_query,
+                    execution_time_ms=elapsed_ms,
+                    status="SUCCESS",
+                    rows_returned=len(rows),
+                )
+
+                st.success(
+                    f"Query executed successfully in {elapsed_ms:.3f} ms. "
+                    f"Rows returned: {len(rows)}."
+                )
+
+                if rows:
+                    st.dataframe(
+                        pd.DataFrame(rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("The query returned no rows.")
+
+            except Exception as error:
+                elapsed_ms = (time.perf_counter() - started) * 1000
+
+                st.error(f"Query failed: {error}")
+
+                # Attempt to preserve failed-query history.
+                try:
+                    db.save_query_history(
+                        query_text=query.strip(),
+                        execution_time_ms=elapsed_ms,
+                        status="FAILED",
+                        rows_returned=0,
+                        error_message=str(error),
+                    )
+                except Exception as history_error:
+                    st.warning(
+                        "Could not save query history: "
+                        f"{history_error}"
+                    )
+
+            finally:
+                if cursor is not None:
+                    cursor.close()
+
+    # ---------------------------------------------------------
+    # QUERY HISTORY
+    # ---------------------------------------------------------
+    st.subheader("Recent Queries")
+
+    try:
+        history = db.get_query_history(limit=50)
+
+        if history:
+            history_df = pd.DataFrame(history)
+            st.dataframe(
+                history_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("No query history is available yet.")
+
+    except Exception as error:
+        st.warning(f"Could not load query history: {error}")
+
+    # ---------------------------------------------------------
+    # SCHEDULER EXECUTION HISTORY
+    # ---------------------------------------------------------
+    st.subheader("Scheduler Execution History")
+
+    try:
+        executions = db.get_execution_history()
+
+        if executions:
+            st.dataframe(
+                pd.DataFrame(executions),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info(
+                "No workload execution records are available yet. "
+                "Execute a workload from the Scheduler page first."
+            )
+
+    except Exception as error:
+        st.warning(
+            f"Could not load scheduler history: {error}"
         )
 
-    with col2:
-        st.metric(
-            "Active Locks",
-            "--"
+    # ---------------------------------------------------------
+    # RESOURCE HISTORY
+    # ---------------------------------------------------------
+    st.subheader("Latest OS Resource Readings")
+
+    try:
+        readings = db.get_resource_history(limit=20)
+
+        if readings:
+            resource_df = pd.DataFrame(readings)
+            st.dataframe(
+                resource_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            chart_df = resource_df[
+                ["recorded_at", "cpu_percent", "memory_percent",
+                 "disk_percent"]
+            ].copy()
+
+            chart_df["recorded_at"] = pd.to_datetime(
+                chart_df["recorded_at"]
+            )
+
+            chart_df = (
+                chart_df
+                .sort_values("recorded_at")
+                .set_index("recorded_at")
+            )
+
+            st.line_chart(
+                chart_df[
+                    ["cpu_percent", "memory_percent", "disk_percent"]
+                ]
+            )
+        else:
+            st.info(
+                "No OS resource readings have been saved yet."
+            )
+
+    except Exception as error:
+        st.warning(
+            f"Could not load resource history: {error}"
         )
 
-    with col3:
-        st.metric(
-            "Buffer Hit Ratio",
-            "--"
-        )
+    # ---------------------------------------------------------
+    # REFRESH
+    # ---------------------------------------------------------
+    if st.button("🔄 Refresh Database Metrics"):
+        st.rerun()
 
-    st.info(
-        "These metrics will be collected from PostgreSQL after "
-        "the database monitoring backend is connected."
-    )
+    db.close()
 
-    # ============================================================
-    # RECENT QUERIES
-    # ============================================================
-
-    st.markdown(
-        '<div class="section-title">Recent Queries</div>',
-        unsafe_allow_html=True
-    )
-
-    query_columns = [
-        "Query ID",
-        "Query",
-        "Execution Time",
-        "Timestamp",
-        "Status"
-    ]
-
-    st.dataframe(
-        [],
-        column_config={
-            "Query ID": st.column_config.TextColumn("Query ID"),
-            "Query": st.column_config.TextColumn("Query"),
-            "Execution Time": st.column_config.TextColumn(
-                "Execution Time"
-            ),
-            "Timestamp": st.column_config.TextColumn("Timestamp"),
-            "Status": st.column_config.TextColumn("Status")
-        },
-        use_container_width=True,
-        hide_index=True
-    )
-
-    st.markdown("""
-    <div class="empty-card">
-        <div class="empty-icon">🗃️</div>
-        <strong>No query history available</strong><br>
-        Executed SQL queries will appear here after PostgreSQL
-        integration is completed.
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ============================================================
-    # DATABASE INFORMATION
-    # ============================================================
-
-    st.markdown(
-        '<div class="section-title">Database Monitoring Metrics</div>',
-        unsafe_allow_html=True
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        <div class="info-card">
-
-        <strong>⏱️ Query Execution Time</strong><br><br>
-
-        Measures how long a SQL query takes to execute.
-
-        <br><br>
-
-        A higher execution time can indicate that a query
-        or database operation requires further analysis.
-
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="info-card">
-
-        <strong>🔒 Active Locks</strong><br><br>
-
-        Shows currently detected PostgreSQL lock entries.
-
-        <br><br>
-
-        Lock information helps identify possible database
-        contention between transactions or operations.
-
-        </div>
-        """, unsafe_allow_html=True)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        <div class="info-card">
-
-        <strong>📦 Buffer Hit Ratio</strong><br><br>
-
-        Indicates how often PostgreSQL can satisfy data
-        requests from its buffer cache instead of requiring
-        disk reads.
-
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="info-card">
-
-        <strong>🔗 OS–DBMS Connection</strong><br><br>
-
-        Database performance information can be correlated
-        with OS resource information for bottleneck analysis.
-
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ============================================================
-    # OS + DATABASE CORRELATION
-    # ============================================================
-
-    st.markdown(
-        '<div class="section-title">OS–DBMS Performance Correlation</div>',
-        unsafe_allow_html=True
-    )
-
-    st.markdown("""
-    <div class="info-card">
-
-    SysNexa can combine operating-system and database information.
-
-    <br><br>
-
-    <strong>OS metrics:</strong>
-    CPU usage, memory usage and disk activity.
-
-    <br><br>
-
-    <strong>Database metrics:</strong>
-    query execution time, active locks and buffer hit ratio.
-
-    <br><br>
-
-    These measurements can be used together by the
-    <strong>Bottleneck Analyzer</strong> to identify possible
-    performance issues.
-
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ============================================================
-    # REFRESH BUTTON
-    # ============================================================
-
-    st.markdown("")
-
-    if st.button(
-        "🔄 Refresh Database Metrics",
-        use_container_width=True
-    ):
-        st.info(
-            "Database metrics will be refreshed from PostgreSQL "
-            "after the database backend is implemented."
-        )
-
-    # ============================================================
-    # DEVELOPMENT STATUS
-    # ============================================================
-
-    st.markdown("""
-    <div class="status-note">
-        <strong>Development Status:</strong>
-        Frontend ready. PostgreSQL connection, query execution,
-        lock monitoring and performance metrics will be connected
-        through the backend.
-    </div>
-    """, unsafe_allow_html=True)
