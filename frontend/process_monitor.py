@@ -1,39 +1,219 @@
-
 import streamlit as st
+from types import SimpleNamespace
+from backend.database_manager import DatabaseManager
 
 
-def show_process_monitor():
-    # ==========================================
-    # GET SHARED TASK RECORDS
-    # ==========================================
+# ==========================================
+# GET PERSISTENT PROCESS RECORDS
+# ==========================================
+
+def get_persistent_processes():
+
     task_manager = st.session_state.get("task_manager")
 
-    if task_manager is not None:
-        tasks = task_manager.get_all_tasks()
-    else:
-        tasks = []
+    session_tasks = (
+        task_manager.get_all_tasks()
+        if task_manager is not None
+        else []
+    )
+
+    records = {}
+    db = None
+
+    try:
+
+        db = DatabaseManager()
+
+        workloads = db.get_workloads()
+        executions = db.get_execution_history()
+
+        latest_executions = {}
+
+        for execution in executions:
+
+            task_id = execution["task_id"]
+
+            previous = latest_executions.get(task_id)
+
+            if (
+                previous is None
+                or execution["execution_id"]
+                > previous["execution_id"]
+            ):
+                latest_executions[task_id] = execution
+
+        for workload in workloads:
+
+            task_id = workload["task_id"]
+
+            execution = latest_executions.get(task_id, {})
+
+            state = workload.get("status")
+
+            if state not in ("COMPLETED", "FAILED"):
+                continue
+
+            memory_mb = execution.get("peak_memory_mb")
+
+            task = SimpleNamespace(
+
+                task_id=task_id,
+
+                workload_name=workload.get(
+                    "workload_name", "Unknown"
+                ),
+
+                workload_type=workload.get(
+                    "workload_type", "Unknown"
+                ),
+
+                priority=workload.get("priority"),
+
+                state=state,
+
+                pid=execution.get("pid"),
+
+                arrival_time=workload.get("submitted_at"),
+
+                start_time=None,
+
+                completion_time=None,
+
+                execution_recorded_at=execution.get(
+                    "executed_at"
+                ),
+
+                execution_time=execution.get(
+                    "execution_time_seconds"
+                ),
+
+                cpu_time_seconds=execution.get(
+                    "cpu_time_seconds"
+                ),
+
+                cpu_percent=execution.get("cpu_percent"),
+
+                memory_peak_bytes=(
+                    float(memory_mb) * 1024 ** 2
+                    if memory_mb is not None
+                    else None
+                ),
+
+                exit_code=execution.get("exit_code"),
+
+                retry_count=None,
+
+                stdout="",
+
+                stderr="",
+
+                failure_reason=None
+            )
+
+            records[task_id] = task
+
+    except Exception as error:
+
+        st.warning(
+            f"Could not retrieve saved processes: {error}"
+        )
+
+    finally:
+
+        if db is not None:
+            db.close()
+
+    # Merge current session without duplicates
+
+    for task in session_tasks:
+
+        records[task.task_id] = task
+
+    return list(reversed(list(records.values())))
+
+
+# ==========================================
+# FORMAT VALUES
+# ==========================================
+
+def format_number(value, decimals=2):
+
+    if value is None:
+        return None
+
+    try:
+        return round(float(value), decimals)
+
+    except (ValueError, TypeError):
+        return None
+
+
+def format_metric(value, unit="", decimals=2):
+
+    value = format_number(value, decimals)
+
+    if value is None:
+        return "N/A"
+
+    return f"{value:.{decimals}f}{unit}"
+
+
+# ==========================================
+# PROCESS MONITOR
+# ==========================================
+
+def show_process_monitor():
+
+    tasks = get_persistent_processes()
+
+    task_manager = st.session_state.get("task_manager")
+
+    session_tasks = (
+        task_manager.get_all_tasks()
+        if task_manager is not None
+        else []
+    )
+
+    session_ids = {
+        task.task_id for task in session_tasks
+    }
 
     total_processes = len(tasks)
-    ready_count = sum(task.state == "READY" for task in tasks)
-    running_count = sum(task.state == "RUNNING" for task in tasks)
-    completed_count = sum(task.state == "COMPLETED" for task in tasks)
-    failed_count = sum(task.state == "FAILED" for task in tasks)
+
+    ready_count = sum(
+        task.state == "READY" for task in tasks
+    )
+
+    running_count = sum(
+        task.state == "RUNNING" for task in tasks
+    )
+
+    completed_count = sum(
+        task.state == "COMPLETED" for task in tasks
+    )
+
+    failed_count = sum(
+        task.state == "FAILED" for task in tasks
+    )
 
     retry_attempts = sum(
-        getattr(task, "retry_count", 0) for task in tasks
+        getattr(task, "retry_count", 0) or 0
+        for task in session_tasks
     )
 
     recovered_count = sum(
         task.state == "COMPLETED"
-        and getattr(task, "retry_count", 0) > 0
-        for task in tasks
+        and (getattr(task, "retry_count", 0) or 0) > 0
+        for task in session_tasks
     )
 
     # ==========================================
     # PAGE STYLING
     # ==========================================
+
     st.markdown("""
     <style>
+
     .page-title {
         font-size: 32px;
         font-weight: 700;
@@ -87,12 +267,14 @@ def show_process_monitor():
         padding: 16px;
         margin-top: 18px;
     }
+
     </style>
     """, unsafe_allow_html=True)
 
     # ==========================================
     # PAGE HEADER
     # ==========================================
+
     st.markdown(
         '<div class="page-title">Process Monitor</div>',
         unsafe_allow_html=True
@@ -100,14 +282,22 @@ def show_process_monitor():
 
     st.markdown(
         '<div class="page-subtitle">'
-        'Monitor submitted workloads and their individual resource usage.'
+        'Monitor current and previously executed workloads '
+        'with their individual resource usage.'
         '</div>',
         unsafe_allow_html=True
     )
 
+    if st.button(
+        "Refresh Process Status",
+        width="stretch"
+    ):
+        st.rerun()
+
     # ==========================================
     # PROCESS SUMMARY
     # ==========================================
+
     st.markdown(
         '<div class="section-title">Process Summary</div>',
         unsafe_allow_html=True
@@ -123,8 +313,12 @@ def show_process_monitor():
 
     columns = st.columns(5)
 
-    for col, (label, value) in zip(columns, summary_cards):
+    for col, (label, value) in zip(
+        columns, summary_cards
+    ):
+
         with col:
+
             st.markdown(f"""
             <div class="status-card">
                 <div class="status-label">{label}</div>
@@ -132,307 +326,581 @@ def show_process_monitor():
             </div>
             """, unsafe_allow_html=True)
 
+    st.caption(
+        "Process records are combined from MySQL "
+        "and the current application session."
+    )
+
     # ==========================================
-    # CURRENT RUNNING PROCESS
+    # CURRENT RUNNING PROCESSES
     # ==========================================
+
     st.markdown(
-        '<div class="section-title">Current Running Process</div>',
+        '<div class="section-title">'
+        'Current Running Process</div>',
         unsafe_allow_html=True
     )
 
     running_tasks = [
-        task for task in tasks if task.state == "RUNNING"
+        task for task in session_tasks
+        if task.state == "RUNNING"
     ]
 
     if running_tasks:
+
         for task in running_tasks:
+
             st.info(
                 f"Workload: {task.workload_name} | "
                 f"Task ID: {task.task_id} | "
-                f"PID: {getattr(task, 'pid', None) or 'Not assigned'}"
+                f"PID: "
+                f"{getattr(task, 'pid', None) or 'Not assigned'}"
             )
+
     else:
+
         st.info("No process is currently running.")
 
     # ==========================================
-    # PROCESS TABLE
+    # PROCESS FILTERS
     # ==========================================
+
     st.markdown(
         '<div class="section-title">Process List</div>',
         unsafe_allow_html=True
     )
 
-    process_data = []
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+
+    with filter_col1:
+
+        selected_state = st.selectbox(
+            "Process State",
+            [
+                "All",
+                "READY",
+                "RUNNING",
+                "COMPLETED",
+                "FAILED"
+            ],
+            key="process_monitor_state"
+        )
+
+    with filter_col2:
+
+        selected_source = st.selectbox(
+            "Record Source",
+            [
+                "All Processes",
+                "Current Session",
+                "Previous Sessions"
+            ],
+            key="process_monitor_source"
+        )
+
+    with filter_col3:
+
+        search = st.text_input(
+            "Search Workload",
+            placeholder="Name or Task ID",
+            key="process_monitor_search"
+        )
+
+    filtered_tasks = []
 
     for task in tasks:
-        memory_bytes = getattr(task, "memory_peak_bytes", None)
+
+        if (
+            selected_state != "All"
+            and task.state != selected_state
+        ):
+            continue
+
+        if (
+            selected_source == "Current Session"
+            and task.task_id not in session_ids
+        ):
+            continue
+
+        if (
+            selected_source == "Previous Sessions"
+            and task.task_id in session_ids
+        ):
+            continue
+
+        if search:
+
+            search_value = search.lower().strip()
+
+            if (
+                search_value not in str(
+                    task.workload_name
+                ).lower()
+
+                and search_value not in str(
+                    task.task_id
+                ).lower()
+            ):
+                continue
+
+        filtered_tasks.append(task)
+
+    # ==========================================
+    # PROCESS TABLE
+    # ==========================================
+
+    process_data = []
+
+    for task in filtered_tasks:
+
+        memory_bytes = getattr(
+            task, "memory_peak_bytes", None
+        )
 
         process_data.append({
+
             "Task ID": task.task_id,
+
             "Workload": task.workload_name,
-            "Type": getattr(task, "workload_type", "Unknown"),
+
+            "Type": getattr(
+                task, "workload_type", "Unknown"
+            ),
+
             "PID": getattr(task, "pid", None),
+
             "State": task.state,
+
             "Priority": getattr(task, "priority", None),
-            "Arrival Time": getattr(task, "arrival_time", None),
-            "Start Time": getattr(task, "start_time", None),
-            "Completion Time": getattr(task, "completion_time", None),
-            "Execution Time (s)": (
-                round(task.execution_time, 3)
-                if getattr(task, "execution_time", None) is not None
-                else None
+
+            "Arrival Time": getattr(
+                task, "arrival_time", None
             ),
-            "CPU Time (s)": (
-                round(task.cpu_time_seconds, 3)
-                if getattr(task, "cpu_time_seconds", None) is not None
-                else None
+
+            "Start Time": getattr(
+                task, "start_time", None
             ),
-            "CPU Usage (%)": (
-                round(task.cpu_percent, 1)
-                if getattr(task, "cpu_percent", None) is not None
-                else None
+
+            "Completion Time": getattr(
+                task, "completion_time", None
             ),
+
+            "Execution Recorded At": getattr(
+                task, "execution_recorded_at", None
+            ),
+
+            "Execution Time (s)": format_number(
+                getattr(task, "execution_time", None),
+                3
+            ),
+
+            "CPU Time (s)": format_number(
+                getattr(task, "cpu_time_seconds", None),
+                3
+            ),
+
+            "CPU Usage (%)": format_number(
+                getattr(task, "cpu_percent", None),
+                1
+            ),
+
             "Peak Memory (MB)": (
-                round(memory_bytes / (1024 ** 2), 2)
+                round(float(memory_bytes) / 1024 ** 2, 2)
                 if memory_bytes is not None
                 else None
             ),
-            "Exit Code": getattr(task, "exit_code", None),
-            "Retry Count": getattr(task, "retry_count", 0)
+
+            "Exit Code": getattr(
+                task, "exit_code", None
+            ),
+
+            "Retry Count": getattr(
+                task, "retry_count", None
+            ),
+
+            "Source": (
+                "Current Session"
+                if task.task_id in session_ids
+                else "MySQL History"
+            )
         })
 
     if process_data:
+
         st.dataframe(
             process_data,
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
+
+        st.caption(
+            f"Showing {len(process_data)} "
+            f"of {total_processes} processes."
+        )
+
     else:
-        st.caption("No workloads have been submitted.")
+
+        st.info("No matching processes found.")
 
     # ==========================================
-    # INDIVIDUAL TASK USAGE CARDS
+    # INDIVIDUAL TASK USAGE
     # ==========================================
+
     st.markdown(
-        '<div class="section-title">Individual Task Usage</div>',
+        '<div class="section-title">'
+        'Individual Task Usage</div>',
         unsafe_allow_html=True
     )
 
-    if tasks:
-        for index, task in enumerate(tasks, start=1):
-            execution_time = getattr(task, "execution_time", None)
-            cpu_time = getattr(task, "cpu_time_seconds", None)
-            cpu_percent = getattr(task, "cpu_percent", None)
-            memory_peak = getattr(task, "memory_peak_bytes", None)
+    if filtered_tasks:
+
+        for index, task in enumerate(
+            filtered_tasks, start=1
+        ):
+
+            execution_time = getattr(
+                task, "execution_time", None
+            )
+
+            cpu_time = getattr(
+                task, "cpu_time_seconds", None
+            )
+
+            cpu_percent = getattr(
+                task, "cpu_percent", None
+            )
+
+            memory_peak = getattr(
+                task, "memory_peak_bytes", None
+            )
+
             pid = getattr(task, "pid", None)
-            exit_code = getattr(task, "exit_code", None)
+
+            exit_code = getattr(
+                task, "exit_code", None
+            )
 
             memory_mb = (
-                memory_peak / (1024 ** 2)
+                float(memory_peak) / 1024 ** 2
                 if memory_peak is not None
                 else None
             )
 
-            state = getattr(task, "state", "UNKNOWN")
+            state = getattr(
+                task, "state", "UNKNOWN"
+            )
 
             with st.container(border=True):
-                # Task heading and status
-                header_col, status_col = st.columns([3, 1])
+
+                header_col, status_col = st.columns(
+                    [3, 1]
+                )
 
                 with header_col:
+
                     st.subheader(
-                        f"Task {index}: {task.workload_name}"
+                        f"Task {index}: "
+                        f"{task.workload_name}"
                     )
-                    st.caption(f"Task ID: {task.task_id}")
+
+                    st.caption(
+                        f"Task ID: {task.task_id}"
+                    )
+
+                    st.caption(
+                        "Source: "
+                        + (
+                            "Current Session"
+                            if task.task_id in session_ids
+                            else "MySQL History"
+                        )
+                    )
 
                 with status_col:
+
                     if state == "COMPLETED":
                         st.success(state)
+
                     elif state == "RUNNING":
                         st.info(state)
+
                     elif state == "FAILED":
                         st.error(state)
+
                     else:
                         st.warning(state)
 
-                # Resource metrics
                 col1, col2, col3, col4 = st.columns(4)
 
                 with col1:
+
                     st.metric(
                         "CPU Usage",
-                        f"{cpu_percent:.1f}%"
-                        if cpu_percent is not None
-                        else "N/A"
+                        format_metric(
+                            cpu_percent, "%", 1
+                        )
                     )
 
                 with col2:
+
                     st.metric(
                         "Peak Memory",
-                        f"{memory_mb:.2f} MB"
-                        if memory_mb is not None
-                        else "N/A"
+                        format_metric(
+                            memory_mb, " MB", 2
+                        )
                     )
 
                 with col3:
+
                     st.metric(
                         "Execution Time",
-                        f"{execution_time:.3f} s"
-                        if execution_time is not None
-                        else "N/A"
+                        format_metric(
+                            execution_time, " s", 3
+                        )
                     )
 
                 with col4:
+
                     st.metric(
                         "CPU Time",
-                        f"{cpu_time:.3f} s"
-                        if cpu_time is not None
-                        else "N/A"
+                        format_metric(
+                            cpu_time, " s", 3
+                        )
                     )
 
                 st.divider()
 
-                # Additional process information
-                info_col1, info_col2, info_col3 = st.columns(3)
+                info_col1, info_col2, info_col3 = (
+                    st.columns(3)
+                )
 
                 with info_col1:
+
                     st.write(
                         f"**Linux PID:** "
                         f"{pid if pid is not None else 'N/A'}"
                     )
 
                 with info_col2:
+
                     st.write(
                         f"**Priority:** "
                         f"{getattr(task, 'priority', 'N/A')}"
                     )
 
                 with info_col3:
+
                     st.write(
                         f"**Exit Code:** "
                         f"{exit_code if exit_code is not None else 'N/A'}"
                     )
 
-                # Program output
                 stdout = getattr(task, "stdout", "")
+
                 stderr = getattr(task, "stderr", "")
-                failure_reason = getattr(task, "failure_reason", None)
+
+                failure_reason = getattr(
+                    task, "failure_reason", None
+                )
 
                 if stdout:
-                    with st.expander("View Program Output"):
-                        st.code(stdout, language="text")
+
+                    with st.expander(
+                        "View Program Output"
+                    ):
+
+                        st.code(
+                            stdout,
+                            language="text"
+                        )
 
                 if stderr:
-                    with st.expander("View Program Errors"):
-                        st.code(stderr, language="text")
+
+                    with st.expander(
+                        "View Program Errors"
+                    ):
+
+                        st.code(
+                            stderr,
+                            language="text"
+                        )
 
                 if failure_reason:
-                    st.error(f"Failure reason: {failure_reason}")
+
+                    st.error(
+                        f"Failure reason: {failure_reason}"
+                    )
 
     else:
-        st.info("No workloads submitted yet.")
+
+        st.info("No matching workloads available.")
 
     # ==========================================
-    # FAILURE DETECTION & RECOVERY
+    # FAILURE DETECTION AND RECOVERY
     # ==========================================
+
     st.markdown(
-        '<div class="section-title">Failure Detection & Recovery</div>',
+        '<div class="section-title">'
+        'Failure Detection & Recovery</div>',
         unsafe_allow_html=True
     )
 
     st.markdown("""
     <div class="failure-box">
+
         <strong style="color:#f87171; font-size:15px;">
             Failure Monitoring
         </strong>
+
         <br><br>
+
         <span style="color:#cbd5e1; font-size:13px;">
-            Failed tasks are identified from their recorded process state.
-            Automatic failure detection and retry depend on runtime integration.
+
+            Failed workloads are identified using
+            their recorded process states.
+
+            Previous failed workloads are retrieved
+            from MySQL.
+
+            Retry and recovery information depends
+            on the current runtime session.
+
         </span>
+
     </div>
     """, unsafe_allow_html=True)
 
     st.write("**Recovery Status**")
 
-    recovery_col1, recovery_col2, recovery_col3 = st.columns(3)
+    recovery_col1, recovery_col2, recovery_col3 = (
+        st.columns(3)
+    )
 
     with recovery_col1:
-        st.metric("Failed Operations", failed_count)
+
+        st.metric(
+            "Failed Operations",
+            failed_count
+        )
 
     with recovery_col2:
-        st.metric("Retry Attempts", retry_attempts)
+
+        st.metric(
+            "Retry Attempts (Session)",
+            retry_attempts
+        )
 
     with recovery_col3:
-        st.metric("Recovered Operations", recovered_count)
+
+        st.metric(
+            "Recovered Operations (Session)",
+            recovered_count
+        )
 
     st.caption(
-        "These values use the task records currently held in memory. "
-        "This page displays recorded retry information but does not "
-        "perform task retries itself."
+        "Failure counts include saved historical workloads. "
+        "Retry and recovery counts use current-session "
+        "information only."
     )
 
     # ==========================================
     # FAILURE DETAILS
     # ==========================================
+
     st.markdown(
-        '<div class="section-title">Failure Details</div>',
+        '<div class="section-title">'
+        'Failure Details</div>',
         unsafe_allow_html=True
     )
 
     failure_data = []
 
     for task in tasks:
+
         if task.state == "FAILED":
+
             failure_data.append({
+
                 "Task ID": task.task_id,
+
                 "Workload": task.workload_name,
-                "PID": getattr(task, "pid", None),
-                "Exit Code": getattr(task, "exit_code", None),
+
+                "PID": getattr(
+                    task, "pid", None
+                ),
+
+                "Exit Code": getattr(
+                    task, "exit_code", None
+                ),
+
                 "Failure Reason": (
-                    getattr(task, "failure_reason", None)
+                    getattr(
+                        task, "failure_reason", None
+                    )
                     or getattr(task, "stderr", "")
                     or "Not recorded"
                 ),
-                "Retry Count": getattr(task, "retry_count", 0),
-                "Recovery Status": "Failed"
+
+                "Retry Count": getattr(
+                    task, "retry_count", None
+                ),
+
+                "Recovery Status": "Failed",
+
+                "Source": (
+                    "Current Session"
+                    if task.task_id in session_ids
+                    else "MySQL History"
+                )
             })
 
     if failure_data:
+
         st.dataframe(
             failure_data,
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
-    else:
-        st.caption(
-            "Failure information will appear here when a task "
-            "is marked FAILED."
-        )
 
-    # ==========================================
-    # REFRESH
-    # ==========================================
-    if st.button(
-        "Refresh Process Status",
-        use_container_width=True
-    ):
-        st.rerun()
+    else:
+
+        st.success("No failed workloads recorded.")
 
     # ==========================================
     # RUNTIME MONITORING NOTE
     # ==========================================
+
     st.markdown("""
     <div class="info-box">
+
         <strong style="color:#60a5fa; font-size:15px;">
-            Runtime Process Monitoring
+            Persistent Process Monitoring
         </strong>
+
         <br><br>
+
         <span style="color:#cbd5e1; font-size:13px;">
-            Each task card displays the metrics recorded for that task,
-            including Linux PID, exit status, execution time, CPU time,
-            average CPU usage and sampled peak memory.
-            Metrics depend on the executor recording those values.
+
+            Current workloads are retrieved from
+            TaskManager.
+
+            Previously completed and failed workloads
+            are retrieved from MySQL.
+
+            Saved process records remain available
+            after browser refresh and application restart.
+
+            Historical PID values represent recorded
+            Linux processes, not currently running processes.
+
+            Metrics that were not saved remain unavailable.
+
         </span>
+
     </div>
     """, unsafe_allow_html=True)
+
+
+if __name__ == "__main__":
+
+    show_process_monitor()

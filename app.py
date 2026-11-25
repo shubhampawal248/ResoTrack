@@ -1,4 +1,7 @@
+
 import streamlit as st
+from frontend.load_runtime import show_load_runtime
+from backend.task_manager import TaskManager
 from frontend.home import show_home
 from frontend.submit_workload import show_submit_workload
 from frontend.scheduler_page import show_scheduler
@@ -8,14 +11,20 @@ from frontend.history_page import show_history
 from frontend.bottleneck_page import show_bottleneck_analysis
 from frontend.database_page import show_database_monitor
 
+
 st.set_page_config(
     page_title="SysNexa",
     page_icon="⚙️",
     layout="wide"
 )
 
+if "task_manager" not in st.session_state:
+    st.session_state["task_manager"] = TaskManager()
+
+
 st.title("SysNexa")
 st.subheader("Operating System and Database Resource Manager")
+
 
 st.sidebar.title("SysNexa")
 
@@ -29,13 +38,18 @@ page = st.sidebar.radio(
         "Resource Monitor",
         "History",
         "Bottleneck Analysis",
-        "Database Monitor"
+        "Database Monitor",
+        "Load Runtime"
     ]
 )
 
+# Display the selected page
 if page == "Home":
     show_home()
 
+elif page == "Load Runtime":
+    show_load_runtime()
+    
 elif page == "Submit Workload":
     show_submit_workload()
 

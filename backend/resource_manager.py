@@ -1,4 +1,4 @@
-```python
+
 import subprocess
 import pandas as pd
 from io import StringIO
@@ -166,4 +166,3 @@ PY
             "resources": resources,
             "available": available
         }
-```
